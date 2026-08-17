@@ -34,10 +34,16 @@ export function makeMessage(source: Record<string, unknown>): UniversalMessage {
   const rawAuthor = source.role ?? source.sender ?? source.author;
   const author = rawAuthor && typeof rawAuthor === "object" ? (rawAuthor as Record<string, unknown>).role : rawAuthor;
   return {
-    id: createId("message"),
+    // Provider message IDs are essential for preserving conversation branches.
+    // Fall back to a generated value only when the source has no stable ID.
+    id: typeof source.uuid === "string" ? source.uuid : typeof source.id === "string" ? source.id : createId("message"),
     role: roleFromUnknown(author),
     content: blocksFromUnknown(content),
     createdAt: toIsoDate(source.created_at ?? source.createdAt ?? source.timestamp ?? source.time),
+    updatedAt: toIsoDate(source.updated_at ?? source.updatedAt),
+    parentMessageId: typeof source.parent_message_uuid === "string"
+      ? source.parent_message_uuid
+      : typeof source.parentMessageId === "string" ? source.parentMessageId : typeof source.parent_id === "string" ? source.parent_id : undefined,
     model: typeof source.model === "string" ? source.model : undefined,
     authorName: typeof source.author_name === "string" ? source.author_name : undefined,
   };
