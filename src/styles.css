@@ -51,7 +51,11 @@ h1 { font-size: clamp(2.3rem, 6vw, 4.4rem); letter-spacing: -.055em; line-height
 .message.user { border-left: 3px solid #75ddcb; }
 .message.assistant { border-left: 3px solid #7ba8ff; }
 .message.system, .message.tool { border-left: 3px solid #d7a866; }
-.message > header { display: flex; justify-content: space-between; padding: 10px 15px; color: #b9c6d5; background: #172331; font-size: .78rem; text-transform: capitalize; }
+.message > header { display: flex; justify-content: space-between; gap: 12px; padding: 10px 15px; color: #b9c6d5; background: #172331; font-size: .78rem; text-transform: capitalize; }
+.message-header-actions, .branch-navigator { display: inline-flex; align-items: center; gap: 7px; }
+.branch-navigator { color: #b9c6d5; font-variant-numeric: tabular-nums; }
+.branch-navigator button { border: 0; background: transparent; color: #dce5f0; font: inherit; font-size: 1.25rem; line-height: .8; padding: 0 2px; cursor: pointer; }
+.branch-navigator button:disabled { color: #536173; cursor: default; }
 .message time { color: #8190a3; text-transform: none; }
 .message-body { padding: 3px 18px 18px; color: #e5ecf5; line-height: 1.68; overflow-wrap: anywhere; }
 .message-body h1, .message-body h2, .message-body h3 { font-size: 1.15rem; margin-top: 1.35em; letter-spacing: -.02em; }

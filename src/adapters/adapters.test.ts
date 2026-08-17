@@ -18,11 +18,13 @@ describe("conversation adapters", () => {
       id: "source-id", title: "A chat", create_time: 1_700_000_000,
       mapping: {
         root: { message: null },
-        one: { message: { author: { role: "user" }, content: { parts: ["Hello"] }, create_time: 1_700_000_001 } },
+        one: { parent: "root", message: { author: { role: "user" }, content: { parts: ["Hello"] }, create_time: 1_700_000_001 } },
       },
     }]);
     expect(chatGptAdapter.detect({ name: "conversations.json", text }).supported).toBe(true);
     const result = chatGptAdapter.parse({ name: "conversations.json", text });
     expect(result.conversations[0]?.messages[0]?.content).toEqual([{ type: "markdown", markdown: "Hello" }]);
+    expect(result.conversations[0]?.messages[0]?.id).toBe("one");
+    expect(result.conversations[0]?.messages[0]?.parentMessageId).toBe("root");
   });
 });

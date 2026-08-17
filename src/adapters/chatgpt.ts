@@ -4,6 +4,16 @@ import { createId } from "../lib/ids";
 import { toIsoDate } from "../lib/dates";
 import type { UniversalMessage } from "../domain/conversation";
 
+interface ChatGptNodeMessage {
+  nodeId: string;
+  node: Record<string, unknown>;
+  message: Record<string, unknown> | null;
+}
+
+function hasReadableMessage(candidate: ChatGptNodeMessage): candidate is ChatGptNodeMessage & { message: Record<string, unknown> } {
+  return Boolean(candidate.message && candidate.message.author && candidate.message.content);
+}
+
 function isChatGptExport(value: unknown): value is Array<Record<string, unknown>> {
   return Array.isArray(value) && value.some((item) => item && typeof item === "object" && "mapping" in item);
 }
@@ -25,18 +35,22 @@ export const chatGptAdapter: FormatAdapter = {
     const exports = JSON.parse(input.text) as Array<Record<string, unknown>>;
     const conversations = exports.map((conversation) => {
       const mapping = conversation.mapping as Record<string, Record<string, unknown>>;
-      const messages: UniversalMessage[] = Object.values(mapping)
-        .map((node) => node.message as Record<string, unknown> | null)
-        .filter((message): message is Record<string, unknown> => Boolean(message && message.author && message.content))
-        .map((message) => {
+      const messages: UniversalMessage[] = Object.entries(mapping)
+        .map(([nodeId, node]) => ({ nodeId, node, message: node.message as Record<string, unknown> | null }))
+        .filter(hasReadableMessage)
+        .map(({ nodeId, node, message }) => {
           const author = message.author as Record<string, unknown>;
           const content = message.content as Record<string, unknown>;
           return {
-            id: createId("message"),
+            // ChatGPT's mapping keys, rather than generated IDs, connect edits and
+            // regenerated answers to their parent and sibling branches.
+            id: nodeId,
             role: roleFromUnknown(author.role),
             content: blocksFromUnknown(content.parts ?? content.text),
             createdAt: toIsoDate(message.create_time),
-            parentMessageId: typeof message.parent === "string" ? message.parent : undefined,
+            parentMessageId: typeof node.parent === "string"
+              ? node.parent
+              : typeof message.parent === "string" ? message.parent : undefined,
             model: typeof message.metadata === "object" && message.metadata && typeof (message.metadata as Record<string, unknown>).model_slug === "string"
               ? (message.metadata as Record<string, unknown>).model_slug as string : undefined,
           };
