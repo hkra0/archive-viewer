@@ -2,15 +2,18 @@
 
 A local-first reader for AI conversation exports. Files are processed in the browser and are never uploaded by the application.
 
-## MVP features
+## Features
 
-- Drag-and-drop ZIP, JSON, and Markdown import
+- Drag-and-drop ZIP, JSON, Markdown, and folder import
 - ChatGPT and Claude adapters, plus generic JSON and Markdown fallbacks
-- In-memory full-text search, time ordering, Markdown, code highlighting, and ZIP image attachments
+- Local groups with account/profile hints extracted from packaged exports when available
+- Persistent browser-local storage, full-text search, time ordering, Markdown, code highlighting, and image attachments
+- Re-import merging: identical messages are skipped, while conflicting content is preserved as a branch revision
 - Copy the currently selected conversation branch with configurable metadata and an optional AI continuation prompt
+- Delete one group or clear every local group and attachment in one action
 - Cloudflare Pages-compatible static build
 
-The app has no account system, database, server-side file storage, analytics SDK, or automatic remote AI call.
+The app has no sign-in, server-side database, server-side file storage, analytics SDK, or automatic remote AI call. Groups and imported data are stored only in the browser's IndexedDB database until removed by the user.
 
 ## Development
 
@@ -25,8 +28,8 @@ npm run dev
 npm run build
 ```
 
-Deploy the generated `dist` directory to Cloudflare Pages. No database, authentication, or server-side file storage is used.
+Deploy the generated `dist` directory to Cloudflare Pages. No server-side database, authentication, or server-side file storage is used.
 
 ## Supported inputs
 
-The importer detects ChatGPT `conversations.json`, common Claude JSON exports, generic JSON collections, Markdown files, and ZIP archives containing those formats. Gemini, DeepSeek, and Kimi exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.
+The importer detects ChatGPT `conversations.json`, common Claude JSON exports, generic JSON collections, Markdown files, folders containing those files, and ZIP archives containing those formats. Gemini, DeepSeek, and Kimi exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.

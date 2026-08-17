@@ -24,6 +24,8 @@ export const UniversalAttachmentSchema = z.object({
   createdAt: z.string().datetime().optional(),
   sourcePath: z.string().optional(),
   objectUrl: z.string().optional(),
+  /** Raw attachment data is kept only while importing / in IndexedDB. */
+  blob: z.custom<Blob>((value) => typeof Blob !== "undefined" && value instanceof Blob).optional(),
   textContent: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
@@ -31,6 +33,12 @@ export type UniversalAttachment = z.infer<typeof UniversalAttachmentSchema>;
 
 export const UniversalMessageSchema = z.object({
   id: z.string(),
+  /** Stable provider ID when an export exposes one. Internal IDs may differ after merge conflicts. */
+  sourceMessageId: z.string().optional(),
+  /** Stable, normalised representation of the message payload used for local deduplication. */
+  contentHash: z.string().optional(),
+  /** Identifies the import which introduced this local node. */
+  importBatchId: z.string().optional(),
   role: MessageRoleSchema,
   content: z.array(MessageContentBlockSchema).min(1),
   createdAt: z.string().datetime().optional(),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { UniversalConversation, UniversalMessage } from "../domain/conversation";
 import { formatDate } from "../lib/dates";
 import { CONTINUATION_PROMPT, createConversationCopy, DEFAULT_COPY_OPTIONS, type ConversationCopyOptions } from "../features/export/create-conversation-copy";
@@ -26,6 +26,10 @@ interface ConversationTree {
 }
 
 const ROOT_SELECTION_KEY = "__conversation_root__";
+
+function roleLabel(message: UniversalMessage): string {
+  return message.role && message.role !== "unknown" ? message.role : "assistant";
+}
 
 function byDateThenInput(a: UniversalMessage, b: UniversalMessage): number {
   const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
@@ -89,12 +93,22 @@ function BranchNavigator({ siblings, selectedId, onSelect }: { siblings: Univers
   </nav>;
 }
 
-export function ConversationReader({ conversation }: { conversation?: UniversalConversation }) {
+export function ConversationReader({ conversation, onGoHome }: { conversation?: UniversalConversation; onGoHome?(): void }) {
   const tree = useMemo(() => buildConversationTree(conversation?.messages || []), [conversation]);
   const [selection, setSelection] = useState<Record<string, string>>({});
   const [copyOptions, setCopyOptions] = useState<ConversationCopyOptions>(DEFAULT_COPY_OPTIONS);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
-  useEffect(() => { setSelection({}); setCopyStatus("idle"); }, [conversation?.id]);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportControl = useRef<HTMLDivElement>(null);
+  useEffect(() => { setSelection({}); setCopyStatus("idle"); setExportOpen(false); }, [conversation?.id]);
+  useEffect(() => {
+    if (!exportOpen) return undefined;
+    const closeWhenOutside = (event: MouseEvent) => {
+      if (!exportControl.current?.contains(event.target as Node)) setExportOpen(false);
+    };
+    document.addEventListener("mousedown", closeWhenOutside);
+    return () => document.removeEventListener("mousedown", closeWhenOutside);
+  }, [exportOpen]);
   if (!conversation) return <main className="reader empty-reader"><p>Import an export, then select a conversation to start reading.</p></main>;
   const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : conversation.messages;
   const detachedCount = tree.detachedRootGroups.reduce((count, group) => count + group.messages.length, 0);
@@ -108,11 +122,14 @@ export function ConversationReader({ conversation }: { conversation?: UniversalC
     const siblings = isRoot ? roots : tree.childrenByParent.get(message.parentMessageId || "") || [];
     const parentKey = isRoot ? rootKey : message.parentMessageId || rootKey;
     const isMissing = message.metadata?.missingFromExport === true;
-    return <article key={message.id} className={`message ${message.role}${isMissing ? " missing" : ""}`}>
-      <header><strong>{message.authorName || message.role}</strong><span className="message-header-actions"><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt)}</time></span></header>
-      <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>
-      {isMissing && <footer>Role and upstream position inferred from exported UUID relationships; content unavailable.</footer>}
-    </article>;
+    return <div key={message.id} className={`message-stack ${message.role}${isMissing ? " missing" : ""}`}>
+      <strong className="message-role">{roleLabel(message)}</strong>
+      <article className={`message ${message.role}${isMissing ? " missing" : ""}`}>
+        <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>
+        {isMissing && <footer>Role and upstream position inferred from exported UUID relationships; content unavailable.</footer>}
+      </article>
+      <div className="message-branch-actions"><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt)}</time></div>
+    </div>;
   });
   const setCopyOption = (option: keyof ConversationCopyOptions, checked: boolean) => {
     setCopyOptions((current) => ({ ...current, [option]: checked }));
@@ -128,26 +145,26 @@ export function ConversationReader({ conversation }: { conversation?: UniversalC
   };
   return <main className="reader">
     <header className="reader-header">
-      <p className="eyebrow">{conversation.provider.name}</p>
-      <h1>{conversation.metadata.title}</h1>
-      <p>{messages.length} displayed{detachedCount ? ` · ${detachedCount} in detached fragments` : ""} · {conversation.messages.length - placeholderCount} exported messages{placeholderCount ? ` · ${placeholderCount} missing placeholders` : ""} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt)}</p>
-    </header>
-    <section className="copy-panel" aria-label="Copy current conversation branch">
-      <div className="copy-panel-heading">
-        <div><h2>Copy current branch</h2><p>Only the branch currently selected with the arrows will be copied.</p></div>
-        <button className="copy-button" type="button" onClick={() => void copyCurrentBranch()}>{copyStatus === "copied" ? "Copied" : copyStatus === "error" ? "Copy failed" : "Copy conversation"}</button>
+      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{onGoHome ? <button type="button" className="reader-home-title" onClick={onGoHome} title="返回导入主页">{conversation.metadata.title}</button> : conversation.metadata.title}</h1><p>{messages.length} 条消息 · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt)}{detachedCount ? ` · ${detachedCount} 个断开片段` : ""}{placeholderCount ? ` · ${placeholderCount} 条缺失占位` : ""}</p></div>
+      <div className="reader-actions">
+        <div className="export-control" ref={exportControl}>
+          <button className="quiet-button export-button" type="button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>导出</button>
+        {exportOpen && <section className="copy-panel" aria-label="导出当前对话分支">
+          <div className="copy-panel-heading"><div><h2>复制当前分支</h2><p>只复制当前通过箭头选中的对话路径。</p></div><button className="copy-button" type="button" onClick={() => void copyCurrentBranch()}>{copyStatus === "copied" ? "已复制" : copyStatus === "error" ? "复制失败" : "复制对话"}</button></div>
+          <fieldset>
+            <legend>包含内容</legend>
+            <label><input type="checkbox" checked={copyOptions.includeTitle} onChange={(event) => setCopyOption("includeTitle", event.target.checked)} /> 标题</label>
+            <label><input type="checkbox" checked={copyOptions.includeRoles} onChange={(event) => setCopyOption("includeRoles", event.target.checked)} /> 角色</label>
+            <label><input type="checkbox" checked={copyOptions.includeTimestamps} onChange={(event) => setCopyOption("includeTimestamps", event.target.checked)} /> 时间</label>
+            <label><input type="checkbox" checked={copyOptions.includeModels} onChange={(event) => setCopyOption("includeModels", event.target.checked)} /> 模型</label>
+            <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> 缺失消息占位</label>
+            <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> 继续对话提示词</label>
+          </fieldset>
+          {copyOptions.includeContinuationPrompt && <details className="prompt-preview"><summary>预览继续对话提示词</summary><pre>{CONTINUATION_PROMPT}</pre></details>}
+        </section>}
+        </div>
       </div>
-      <fieldset>
-        <legend>Include</legend>
-        <label><input type="checkbox" checked={copyOptions.includeTitle} onChange={(event) => setCopyOption("includeTitle", event.target.checked)} /> Title</label>
-        <label><input type="checkbox" checked={copyOptions.includeRoles} onChange={(event) => setCopyOption("includeRoles", event.target.checked)} /> Roles</label>
-        <label><input type="checkbox" checked={copyOptions.includeTimestamps} onChange={(event) => setCopyOption("includeTimestamps", event.target.checked)} /> Timestamps</label>
-        <label><input type="checkbox" checked={copyOptions.includeModels} onChange={(event) => setCopyOption("includeModels", event.target.checked)} /> Models</label>
-        <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> Missing-message placeholders</label>
-        <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> Continue-in-another-AI prompt</label>
-      </fieldset>
-      {copyOptions.includeContinuationPrompt && <details className="prompt-preview"><summary>Preview continuation prompt</summary><pre>{CONTINUATION_PROMPT}</pre></details>}
-    </section>
+    </header>
     <section className="messages" aria-label="Conversation messages">
       {renderPath(messages, tree.roots, ROOT_SELECTION_KEY)}
       {!messages.length && <p>No readable messages were found in this conversation.</p>}

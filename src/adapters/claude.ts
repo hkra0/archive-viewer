@@ -43,6 +43,7 @@ export function insertClaudeMissingPlaceholders(messages: UniversalMessage[]): U
       .sort((a, b) => messageTime(b) - messageTime(a))[0];
     placeholders.push({
       id: missingId,
+      sourceMessageId: missingId,
       role,
       authorName: role === "assistant" ? "Missing assistant message" : role === "user" ? "Missing user message" : "Missing message",
       content: [{ type: "text", text: "Message content is missing from the export." }],

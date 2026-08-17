@@ -45,6 +45,7 @@ export const chatGptAdapter: FormatAdapter = {
             // ChatGPT's mapping keys, rather than generated IDs, connect edits and
             // regenerated answers to their parent and sibling branches.
             id: nodeId,
+            sourceMessageId: nodeId,
             role: roleFromUnknown(author.role),
             content: blocksFromUnknown(content.parts ?? content.text),
             createdAt: toIsoDate(message.create_time),

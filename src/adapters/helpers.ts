@@ -33,10 +33,12 @@ export function makeMessage(source: Record<string, unknown>): UniversalMessage {
   const content = source.content ?? source.text ?? source.parts ?? source.message ?? "";
   const rawAuthor = source.role ?? source.sender ?? source.author;
   const author = rawAuthor && typeof rawAuthor === "object" ? (rawAuthor as Record<string, unknown>).role : rawAuthor;
+  const sourceMessageId = typeof source.uuid === "string" ? source.uuid : typeof source.id === "string" ? source.id : undefined;
   return {
     // Provider message IDs are essential for preserving conversation branches.
     // Fall back to a generated value only when the source has no stable ID.
-    id: typeof source.uuid === "string" ? source.uuid : typeof source.id === "string" ? source.id : createId("message"),
+    id: sourceMessageId || createId("message"),
+    sourceMessageId,
     role: roleFromUnknown(author),
     content: blocksFromUnknown(content),
     createdAt: toIsoDate(source.created_at ?? source.createdAt ?? source.timestamp ?? source.time),
@@ -57,5 +59,6 @@ export function attachmentFromFile(file: File, sourcePath: string): UniversalAtt
     size: file.size,
     sourcePath,
     objectUrl: URL.createObjectURL(file),
+    blob: file,
   };
 }
