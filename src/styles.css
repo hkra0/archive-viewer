@@ -111,9 +111,11 @@ a { color: inherit; }
 .copy-panel legend { float: left; width: 100%; margin-bottom: 8px; color: #77777b; font-size: .72rem; }
 .copy-panel label { display: inline-flex; align-items: center; gap: 5px; color: #4b4b4e; font-size: .74rem; }
 .copy-panel input { accent-color: #202123; }
-.prompt-preview { margin-top: 10px; color: #656568; font-size: .74rem; }
-.prompt-preview summary { cursor: pointer; }
-.prompt-preview pre { margin: 8px 0 0; padding: 9px; border-radius: 6px; background: #f5f5f6; white-space: pre-wrap; }
+.continuation-prompt { margin-top: 12px; }
+.continuation-prompt-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #4b4b4e; font-size: .74rem; }
+.continuation-prompt-heading .text-button { padding: 3px 6px; font-size: .72rem; }
+.continuation-prompt textarea { width: 100%; min-height: 128px; margin-top: 7px; resize: vertical; border: 1px solid #cfcfd2; border-radius: 8px; padding: 9px 10px; outline: none; background: #f8f8f9; color: #252527; font-size: .78rem; line-height: 1.5; }
+.continuation-prompt textarea:focus { border-color: #77777a; box-shadow: 0 0 0 2px #ececee; }
 
 .messages { display: flex; flex-direction: column; gap: 22px; max-width: 820px; margin-top: 30px; }
 .message-stack { display: flex; flex-direction: column; align-self: flex-start; width: fit-content; max-width: min(100%, 760px); }
@@ -171,7 +173,7 @@ a { color: inherit; }
 :root[data-theme="dark"] body, :root[data-theme="dark"] .app-shell, :root[data-theme="dark"] .reader { background: #212121; }
 :root[data-theme="dark"] .loading-screen { color: #a9a9ad; }
 :root[data-theme="dark"] .brand, :root[data-theme="dark"] .tinyko-mark, :root[data-theme="dark"] .home-header h1, :root[data-theme="dark"] .reader-header h1 { color: #f4f4f4; }
-:root[data-theme="dark"] .welcome-copy p, :root[data-theme="dark"] .dropzone > span:not(.dropzone-icon), :root[data-theme="dark"] .search span, :root[data-theme="dark"] .count, :root[data-theme="dark"] .conversation-meta, :root[data-theme="dark"] .group-trigger-copy small, :root[data-theme="dark"] .reader-header .reader-title > p:last-child, :root[data-theme="dark"] .copy-panel-heading p, :root[data-theme="dark"] .copy-panel legend, :root[data-theme="dark"] .prompt-preview, :root[data-theme="dark"] .message > header, :root[data-theme="dark"] .message > header strong, :root[data-theme="dark"] .message time, :root[data-theme="dark"] .detached-fragments, :root[data-theme="dark"] .detached-fragment h3, :root[data-theme="dark"] .management-dialog p { color: #a9a9ad; }
+:root[data-theme="dark"] .welcome-copy p, :root[data-theme="dark"] .dropzone > span:not(.dropzone-icon), :root[data-theme="dark"] .search span, :root[data-theme="dark"] .count, :root[data-theme="dark"] .conversation-meta, :root[data-theme="dark"] .group-trigger-copy small, :root[data-theme="dark"] .reader-header .reader-title > p:last-child, :root[data-theme="dark"] .copy-panel-heading p, :root[data-theme="dark"] .copy-panel legend, :root[data-theme="dark"] .message > header, :root[data-theme="dark"] .message > header strong, :root[data-theme="dark"] .message time, :root[data-theme="dark"] .detached-fragments, :root[data-theme="dark"] .detached-fragment h3, :root[data-theme="dark"] .management-dialog p { color: #a9a9ad; }
 :root[data-theme="dark"] .dropzone { border-color: #555559; background: #282828; color: #eeeeef; }
 :root[data-theme="dark"] .dropzone:hover, :root[data-theme="dark"] .dropzone.is-dragging { border-color: #a8a8ac; background: #303030; }
 :root[data-theme="dark"] .dropzone-icon { border-color: #545458; }
@@ -193,6 +195,9 @@ a { color: inherit; }
 :root[data-theme="dark"] .text-button:hover, :root[data-theme="dark"] .quiet-button:hover { background: #363636; color: #f3f3f3; }
 :root[data-theme="dark"] .copy-panel label, :root[data-theme="dark"] .message { color: #ececee; }
 :root[data-theme="dark"] .copy-panel input { accent-color: #ececee; }
+:root[data-theme="dark"] .continuation-prompt-heading { color: #ececee; }
+:root[data-theme="dark"] .continuation-prompt textarea { border-color: #555558; background: #202020; color: #eeeeef; }
+:root[data-theme="dark"] .continuation-prompt textarea:focus { border-color: #959599; box-shadow: 0 0 0 2px #3a3a3a; }
 :root[data-theme="dark"] .message.user { background: #303030; }
 :root[data-theme="dark"] .message.system, :root[data-theme="dark"] .message.tool, :root[data-theme="dark"] .message.unknown { border-color: #5a5a5d; background: #292929; }
 :root[data-theme="dark"] .message.missing, :root[data-theme="dark"] .missing-parent-message { background: #352b1d; color: #ebd3ac; }

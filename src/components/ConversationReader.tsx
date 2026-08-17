@@ -160,7 +160,10 @@ export function ConversationReader({ conversation, onGoHome }: { conversation?: 
             <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> 缺失消息占位</label>
             <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> 继续对话提示词</label>
           </fieldset>
-          {copyOptions.includeContinuationPrompt && <details className="prompt-preview"><summary>预览继续对话提示词</summary><pre>{CONTINUATION_PROMPT}</pre></details>}
+          {copyOptions.includeContinuationPrompt && <div className="continuation-prompt">
+            <div className="continuation-prompt-heading"><label htmlFor="continuation-prompt">继续对话提示词</label><button type="button" className="text-button" onClick={() => setCopyOptions((current) => ({ ...current, continuationPrompt: CONTINUATION_PROMPT }))}>恢复默认</button></div>
+            <textarea id="continuation-prompt" value={copyOptions.continuationPrompt} onChange={(event) => { setCopyOptions((current) => ({ ...current, continuationPrompt: event.target.value })); setCopyStatus("idle"); }} rows={6} spellCheck={false} />
+          </div>}
         </section>}
         </div>
       </div>

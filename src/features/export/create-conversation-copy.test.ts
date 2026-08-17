@@ -26,4 +26,10 @@ describe("createConversationCopy", () => {
     expect(result).not.toContain("### user");
     expect(result).not.toContain("Missing");
   });
+
+  it("uses an edited continuation prompt", () => {
+    const result = createConversationCopy(conversation, messages, { ...DEFAULT_COPY_OPTIONS, continuationPrompt: "Continue from the final request." });
+    expect(result).toContain("## Continuation prompt\n\nContinue from the final request.");
+    expect(result).not.toContain("以下是我与另一个 AI");
+  });
 });
