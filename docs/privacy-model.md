@@ -5,6 +5,6 @@
 - The app contains no sign-in, database, upload endpoint, analytics SDK, or automatic network request.
 - Search indexes are rebuilt in memory and discarded with the current session.
 - Attachment Blob URLs are revoked when the user clears the session.
-- Context Snapshots are generated locally and require a user action to copy or download.
+- Current-branch exports are generated locally and require a user action to copy.
 
 Optional persisted storage and remote AI summarisation are deliberately out of scope for this MVP.

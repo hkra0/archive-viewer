@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chatGptAdapter } from "./chatgpt";
-import { claudeAdapter, repairClaudeOrphans } from "./claude";
+import { claudeAdapter, insertClaudeMissingPlaceholders } from "./claude";
 import { genericJsonAdapter } from "./generic-json";
 
 describe("conversation adapters", () => {
@@ -26,7 +26,7 @@ describe("conversation adapters", () => {
     const result = chatGptAdapter.parse({ name: "conversations.json", text });
     expect(result.conversations[0]?.messages[0]?.content).toEqual([{ type: "markdown", markdown: "Hello" }]);
     expect(result.conversations[0]?.messages[0]?.id).toBe("one");
-    expect(result.conversations[0]?.messages[0]?.parentMessageId).toBe("root");
+    expect(result.conversations[0]?.messages[0]?.parentMessageId).toBeUndefined();
   });
 
   it("preserves Claude message parents so edited prompts remain branches", () => {
@@ -34,7 +34,7 @@ describe("conversation adapters", () => {
       name: "conversations.json",
       text: JSON.stringify([{
         uuid: "conversation-1", name: "A Claude chat", chat_messages: [
-          { uuid: "prompt-original", sender: "human", text: "Original", content: [], created_at: "2026-08-01T10:00:00Z" },
+          { uuid: "prompt-original", parent_message_uuid: "00000000-0000-4000-8000-000000000000", sender: "human", text: "Original", content: [], created_at: "2026-08-01T10:00:00Z" },
           { uuid: "answer-original", parent_message_uuid: "prompt-original", sender: "assistant", text: "First answer", content: [], created_at: "2026-08-01T10:01:00Z" },
           { uuid: "prompt-edited", parent_message_uuid: "answer-original", sender: "human", text: "Edited", content: [], created_at: "2026-08-01T10:02:00Z" },
           { uuid: "prompt-revised", parent_message_uuid: "answer-original", sender: "human", text: "Revised", content: [], created_at: "2026-08-01T10:03:00Z" },
@@ -50,21 +50,17 @@ describe("conversation adapters", () => {
     ]);
   });
 
-  it("attaches later Claude orphan prompts to the latest completed reply", () => {
-    const messages = repairClaudeOrphans([
-      { id: "first", role: "user", content: [{ type: "text", text: "First branch" }] },
-      { id: "empty", role: "assistant", parentMessageId: "first", content: [{ type: "text", text: "" }] },
-      { id: "second", role: "user", content: [{ type: "text", text: "Second branch" }] },
-      { id: "reply", role: "assistant", parentMessageId: "second", content: [{ type: "text", text: "Completed reply" }] },
-      { id: "orphan", role: "user", parentMessageId: "missing", content: [{ type: "text", text: "Interrupted prompt" }] },
+  it("inserts a labelled placeholder for an omitted Claude reply", () => {
+    const messages = insertClaudeMissingPlaceholders([
+      { id: "01a00afb-e2ac-7428-a51e-48dafec32eb0", role: "user", createdAt: "2026-08-16T14:31:02.417Z", content: [{ type: "text", text: "Question" }] },
+      { id: "01a00b11-82fc-7f2f-a4f0-63433a9ec5ca", role: "user", parentMessageId: "01a00afb-e2ae-798f-85e3-c0b8cf44b9f1", createdAt: "2026-08-16T14:54:41.268Z", content: [{ type: "text", text: "Follow-up" }] },
     ]);
-    expect(messages.map(({ id, parentMessageId }) => ({ id, parentMessageId }))).toEqual([
-      { id: "first", parentMessageId: undefined },
-      { id: "empty", parentMessageId: "first" },
-      { id: "second", parentMessageId: undefined },
-      { id: "reply", parentMessageId: "second" },
-      { id: "orphan", parentMessageId: "reply" },
-    ]);
-    expect(messages[4]?.metadata).toEqual({ parentInferred: true });
+    const placeholder = messages.find(({ id }) => id === "01a00afb-e2ae-798f-85e3-c0b8cf44b9f1");
+    expect(placeholder).toMatchObject({
+      role: "assistant",
+      parentMessageId: "01a00afb-e2ac-7428-a51e-48dafec32eb0",
+      metadata: { missingFromExport: true, roleInferredFromChildren: true, parentInferredFromUuidTime: true },
+    });
   });
+
 });

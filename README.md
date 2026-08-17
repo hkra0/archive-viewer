@@ -7,7 +7,7 @@ A local-first reader for AI conversation exports. Files are processed in the bro
 - Drag-and-drop ZIP, JSON, and Markdown import
 - ChatGPT and Claude adapters, plus generic JSON and Markdown fallbacks
 - In-memory full-text search, time ordering, Markdown, code highlighting, and ZIP image attachments
-- Editable local Context Snapshot, with copy and Markdown download
+- Copy the currently selected conversation branch with configurable metadata and an optional AI continuation prompt
 - Cloudflare Pages-compatible static build
 
 The app has no account system, database, server-side file storage, analytics SDK, or automatic remote AI call.

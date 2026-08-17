@@ -5,7 +5,6 @@ import { searchConversations } from "./features/search/search";
 import { ImportDropzone } from "./components/ImportDropzone";
 import { ConversationList } from "./components/ConversationList";
 import { ConversationReader } from "./components/ConversationReader";
-import { SnapshotPanel } from "./components/SnapshotPanel";
 
 function chronological(conversations: UniversalConversation[]): UniversalConversation[] {
   return [...conversations].sort((a, b) => new Date(b.metadata.updatedAt ?? b.metadata.createdAt ?? 0).getTime() - new Date(a.metadata.updatedAt ?? a.metadata.createdAt ?? 0).getTime());
@@ -47,7 +46,7 @@ export default function App() {
     {!archive ? <main className="welcome">
       <section className="hero"><p className="eyebrow">LOCAL-FIRST · OPEN FORMAT</p><h1>Your AI conversation history, readable on your device.</h1><p>Import exports from ChatGPT, Claude, and other JSON or Markdown sources. Nothing is uploaded or stored by this app.</p></section>
       <ImportDropzone disabled={importing} onFiles={(files) => void handleImport(files)} />
-      <section className="privacy-grid"><article><h2>Private by default</h2><p>Files are processed in browser memory. Reload or clear the session to remove them.</p></article><article><h2>Platform-neutral</h2><p>Adapters translate providers into one portable conversation format.</p></article><article><h2>Shareable context</h2><p>Create an editable Context Snapshot without making an AI request.</p></article></section>
+      <section className="privacy-grid"><article><h2>Private by default</h2><p>Files are processed in browser memory. Reload or clear the session to remove them.</p></article><article><h2>Platform-neutral</h2><p>Adapters translate providers into one portable conversation format.</p></article><article><h2>Shareable context</h2><p>Copy the currently selected branch with only the metadata you choose.</p></article></section>
       {(errors.length > 0 || warnings.length > 0) && <ImportFeedback errors={errors} warnings={warnings} />}
     </main> : <div className="workspace">
       <aside className="sidebar"><ImportDropzone disabled={importing} onFiles={(files) => void handleImport(files)} />
@@ -56,7 +55,6 @@ export default function App() {
         <ConversationList conversations={visible} selectedId={selected?.id} onSelect={setSelectedId} />
       </aside>
       <ConversationReader conversation={selected} />
-      <SnapshotPanel conversation={selected} />
       {(errors.length > 0 || warnings.length > 0) && <div className="feedback-float"><ImportFeedback errors={errors} warnings={warnings} /></div>}
     </div>}
   </div>;

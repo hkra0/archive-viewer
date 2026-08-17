@@ -48,7 +48,7 @@ export const chatGptAdapter: FormatAdapter = {
             role: roleFromUnknown(author.role),
             content: blocksFromUnknown(content.parts ?? content.text),
             createdAt: toIsoDate(message.create_time),
-            parentMessageId: typeof node.parent === "string"
+            parentMessageId: typeof node.parent === "string" && (!(node.parent in mapping) || mapping[node.parent]?.message)
               ? node.parent
               : typeof message.parent === "string" ? message.parent : undefined,
             model: typeof message.metadata === "object" && message.metadata && typeof (message.metadata as Record<string, unknown>).model_slug === "string"

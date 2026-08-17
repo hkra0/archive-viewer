@@ -5,46 +5,58 @@ import { toIsoDate } from "../lib/dates";
 import type { UniversalMessage } from "../domain/conversation";
 
 type ClaudeItem = Record<string, unknown>;
+const CLAUDE_ROOT_UUID = "00000000-0000-4000-8000-000000000000";
 
 function isClaudeExport(value: unknown): value is ClaudeItem[] {
   return Array.isArray(value) && value.some((item) => item && typeof item === "object" && ("chat_messages" in item || "uuid" in item && "name" in item));
 }
 
-function hasVisibleContent(message: UniversalMessage): boolean {
-  return message.content.some((block) =>
-    (block.type === "markdown" && block.markdown.trim())
-    || (block.type === "text" && block.text.trim())
-    || (block.type === "code" && block.code.trim()),
-  );
+function uuidV7Date(id: string): string | undefined {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return undefined;
+  const milliseconds = Number.parseInt(id.replaceAll("-", "").slice(0, 12), 16);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : undefined;
 }
 
-/**
- * Claude exports can omit a parent row when a response was interrupted or
- * discarded. Keep true roots intact, but attach later dangling prompts to the
- * most recent completed assistant turn so they do not masquerade as roots.
- */
-export function repairClaudeOrphans(messages: UniversalMessage[]): UniversalMessage[] {
-  const messageIds = new Set(messages.map((message) => message.id));
-  let latestCompletedAssistantId: string | undefined;
-  let previousMessageId: string | undefined;
+function messageTime(message: UniversalMessage): number {
+  return message.createdAt ? new Date(message.createdAt).getTime() : Number.NaN;
+}
 
-  return messages.map((message) => {
-    const hasKnownParent = Boolean(message.parentMessageId && messageIds.has(message.parentMessageId));
-    const inferredParentId = hasKnownParent
-      ? undefined
-      : message.role === "user" ? latestCompletedAssistantId : previousMessageId;
-    const repaired = inferredParentId
-      ? {
-          ...message,
-          parentMessageId: inferredParentId,
-          metadata: { ...message.metadata, parentInferred: true },
-        }
-      : message;
+/** Add explicit placeholders for referenced Claude messages omitted from the export. */
+export function insertClaudeMissingPlaceholders(messages: UniversalMessage[]): UniversalMessage[] {
+  const knownIds = new Set(messages.map((message) => message.id));
+  const missingIds = [...new Set(messages.flatMap((message) =>
+    message.parentMessageId && !knownIds.has(message.parentMessageId) ? [message.parentMessageId] : [],
+  ))];
+  const placeholders: UniversalMessage[] = [];
 
-    if (repaired.role === "assistant" && hasVisibleContent(repaired)) latestCompletedAssistantId = repaired.id;
-    previousMessageId = repaired.id;
-    return repaired;
-  });
+  for (const missingId of missingIds.sort((a, b) => (uuidV7Date(a) || "").localeCompare(uuidV7Date(b) || ""))) {
+    const createdAt = uuidV7Date(missingId);
+    if (!createdAt) continue;
+    const children = messages.filter((message) => message.parentMessageId === missingId);
+    const role = children.length && children.every((message) => message.role === "user")
+      ? "assistant" as const
+      : children.length && children.every((message) => message.role === "assistant") ? "user" as const : "unknown" as const;
+    const createdTime = new Date(createdAt).getTime();
+    const expectedParentRole = role === "assistant" ? "user" : role === "user" ? "assistant" : undefined;
+    const preceding = [...messages, ...placeholders]
+      .filter((message) => messageTime(message) < createdTime && (!expectedParentRole || message.role === expectedParentRole))
+      .sort((a, b) => messageTime(b) - messageTime(a))[0];
+    placeholders.push({
+      id: missingId,
+      role,
+      authorName: role === "assistant" ? "Missing assistant message" : role === "user" ? "Missing user message" : "Missing message",
+      content: [{ type: "text", text: "Message content is missing from the export." }],
+      createdAt,
+      parentMessageId: preceding?.id,
+      metadata: {
+        missingFromExport: true,
+        roleInferredFromChildren: role !== "unknown",
+        parentInferredFromUuidTime: Boolean(preceding),
+      },
+    });
+  }
+
+  return [...messages, ...placeholders];
 }
 
 export const claudeAdapter: FormatAdapter = {
@@ -64,7 +76,10 @@ export const claudeAdapter: FormatAdapter = {
     return {
       conversations: data.map((item) => {
         const sourceMessages = Array.isArray(item.chat_messages) ? item.chat_messages : Array.isArray(item.messages) ? item.messages : [];
-        const messages = repairClaudeOrphans(sourceMessages.filter((message): message is ClaudeItem => Boolean(message && typeof message === "object")).map(makeMessage));
+        const messages = insertClaudeMissingPlaceholders(sourceMessages
+          .filter((message): message is ClaudeItem => Boolean(message && typeof message === "object"))
+          .map(makeMessage)
+          .map((message) => message.parentMessageId === CLAUDE_ROOT_UUID ? { ...message, parentMessageId: undefined } : message));
         return {
           id: createId("conversation"),
           provider: { id: "claude", name: "Claude", sourceFormat: "JSON" },
