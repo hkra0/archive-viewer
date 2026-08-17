@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chatGptAdapter } from "./chatgpt";
-import { claudeAdapter } from "./claude";
+import { claudeAdapter, repairClaudeOrphans } from "./claude";
 import { genericJsonAdapter } from "./generic-json";
 
 describe("conversation adapters", () => {
@@ -48,5 +48,23 @@ describe("conversation adapters", () => {
       { id: "prompt-edited", parentMessageId: "answer-original" },
       { id: "prompt-revised", parentMessageId: "answer-original" },
     ]);
+  });
+
+  it("attaches later Claude orphan prompts to the latest completed reply", () => {
+    const messages = repairClaudeOrphans([
+      { id: "first", role: "user", content: [{ type: "text", text: "First branch" }] },
+      { id: "empty", role: "assistant", parentMessageId: "first", content: [{ type: "text", text: "" }] },
+      { id: "second", role: "user", content: [{ type: "text", text: "Second branch" }] },
+      { id: "reply", role: "assistant", parentMessageId: "second", content: [{ type: "text", text: "Completed reply" }] },
+      { id: "orphan", role: "user", parentMessageId: "missing", content: [{ type: "text", text: "Interrupted prompt" }] },
+    ]);
+    expect(messages.map(({ id, parentMessageId }) => ({ id, parentMessageId }))).toEqual([
+      { id: "first", parentMessageId: undefined },
+      { id: "empty", parentMessageId: "first" },
+      { id: "second", parentMessageId: undefined },
+      { id: "reply", parentMessageId: "second" },
+      { id: "orphan", parentMessageId: "reply" },
+    ]);
+    expect(messages[4]?.metadata).toEqual({ parentInferred: true });
   });
 });
