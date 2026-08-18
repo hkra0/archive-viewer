@@ -11,6 +11,8 @@ export interface ConversationGroup {
   name: string;
   providerIds: string[];
   account?: GroupAccount;
+  /** User-maintained note shown below the group name, for example an e-mail address. */
+  note?: string;
   createdAt: string;
   updatedAt: string;
 }
