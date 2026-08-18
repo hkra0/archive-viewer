@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import { detectAdapter } from "../../adapters/registry";
 import type { ImportCandidate } from "../../adapters/adapter";
-import { ConversationArchiveSchema, type ConversationArchive, type ImportWarning, type UniversalConversation } from "../../domain/conversation";
+import { ConversationArchiveSchema, type ConversationArchive, type ImportWarning, type MessageContentBlock, type UniversalConversation } from "../../domain/conversation";
 import { IMPORT_LIMITS } from "./import-limits";
 
 export type ImportSourceType = "zip" | "folder" | "files";
@@ -51,6 +51,18 @@ function parseCandidate(candidate: ImportCandidate): { conversations: UniversalC
     const message = error instanceof Error ? error.message : "Unknown parser error";
     return { conversations: [], warnings: [], error: `${candidate.name}: ${message}` };
   }
+}
+
+function isReadableBlock(block: MessageContentBlock): boolean {
+  if (block.type === "text") return Boolean(block.text.trim());
+  if (block.type === "markdown") return Boolean(block.markdown.trim());
+  if (block.type === "code") return Boolean(block.code.trim());
+  return block.type === "image" || block.type === "file";
+}
+
+/** Empty containers and adapter fallbacks must not become conversations in the archive. */
+export function hasReadableConversationContent(conversation: UniversalConversation): boolean {
+  return conversation.messages.some((message) => message.content.some(isReadableBlock));
 }
 
 function firstString(value: Record<string, unknown>, keys: string[]): string | undefined {
@@ -146,6 +158,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
   const scopedEntries = entries.slice(0, IMPORT_LIMITS.maxFiles);
   const directAttachments = folderAttachments(scopedEntries);
   let account: ImportedAccountProfile | undefined;
+  let skippedEmptyConversations = 0;
   const sourceType: ImportSourceType = entries.some(({ file }) => /\.zip$/i.test(file.name)) ? "zip" : selectionType;
 
   if (entries.length > IMPORT_LIMITS.maxFiles) errors.push(`Only the first ${IMPORT_LIMITS.maxFiles} files can be imported at once.`);
@@ -177,7 +190,9 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
         account = combineAccountProfile(account, profile);
         if (isAccountOnlyCandidate(candidate, profile)) continue;
         const result = parseCandidate(candidate);
-        conversations.push(...result.conversations);
+        const readable = result.conversations.filter(hasReadableConversationContent);
+        skippedEmptyConversations += result.conversations.length - readable.length;
+        conversations.push(...readable);
         warnings.push(...result.warnings);
         if (result.error) errors.push(result.error);
       }
@@ -185,6 +200,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
       errors.push(`${sourcePath}: ${error instanceof Error ? error.message : "Could not read file."}`);
     }
   }
+  if (skippedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATION_SKIPPED", message: String(skippedEmptyConversations) });
   const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations });
   return { archive, warnings, errors, sourceType, account };
 }

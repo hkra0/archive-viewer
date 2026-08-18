@@ -50,7 +50,7 @@ export const genericJsonAdapter: FormatAdapter = {
           updatedAt: toIsoDate(item.updated_at ?? item.updatedAt),
           sourceConversationId: typeof item.id === "string" ? item.id : undefined,
         },
-        messages: messages.length ? messages : [{ id: createId("message"), role: "unknown" as const, content: [{ type: "unknown" as const, raw: item }] }],
+        messages,
         attachments: [],
       };
     });

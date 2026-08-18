@@ -6,10 +6,10 @@ export function toIsoDate(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-export function formatDate(value?: string): string {
-  if (!value) return "Unknown date";
+export function formatDate(value?: string, locale?: string, unknownDate = "Unknown date"): string {
+  if (!value) return unknownDate;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Unknown date" : new Intl.DateTimeFormat(undefined, {
+  return Number.isNaN(date.getTime()) ? unknownDate : new Intl.DateTimeFormat(locale, {
     dateStyle: "medium", timeStyle: "short",
   }).format(date);
 }

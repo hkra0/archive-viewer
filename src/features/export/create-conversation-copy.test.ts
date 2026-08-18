@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UniversalConversation, UniversalMessage } from "../../domain/conversation";
-import { createConversationCopy, DEFAULT_COPY_OPTIONS } from "./create-conversation-copy";
+import { CONTINUATION_PROMPT, continuationPromptForLocale, createConversationCopy, DEFAULT_COPY_OPTIONS } from "./create-conversation-copy";
 
 const conversation: UniversalConversation = {
   id: "conversation", provider: { id: "test", name: "Test" }, metadata: { title: "Current branch" }, attachments: [], messages: [],
@@ -11,6 +11,11 @@ const messages: UniversalMessage[] = [
 ];
 
 describe("createConversationCopy", () => {
+  it("provides locale-specific continuation prompt defaults", () => {
+    expect(continuationPromptForLocale("zh-CN")).toBe(CONTINUATION_PROMPT);
+    expect(continuationPromptForLocale("en")).toContain("Below is my conversation history");
+  });
+
   it("copies only the supplied branch with selected metadata", () => {
     const result = createConversationCopy(conversation, messages, { ...DEFAULT_COPY_OPTIONS, includeContinuationPrompt: false, includeTimestamps: true, includeModels: true });
     expect(result).toContain("# Current branch");

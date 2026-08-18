@@ -1,5 +1,6 @@
 import type { UniversalConversation } from "../domain/conversation";
 import { formatDate } from "../lib/dates";
+import { useI18n } from "../lib/i18n";
 
 interface ConversationListProps {
   conversations: UniversalConversation[];
@@ -8,7 +9,8 @@ interface ConversationListProps {
 }
 
 export function ConversationList({ conversations, selectedId, onSelect }: ConversationListProps) {
-  return <nav className="conversation-list" aria-label="Conversations">
+  const { locale, t } = useI18n();
+  return <nav className="conversation-list" aria-label={t("conversationList")}>
     {conversations.map((conversation) => <button
       type="button"
       className={conversation.id === selectedId ? "conversation-item selected" : "conversation-item"}
@@ -16,8 +18,8 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
       onClick={() => onSelect(conversation.id)}
     >
       <span className="conversation-title">{conversation.metadata.title}</span>
-      <span className="conversation-meta">{conversation.provider.name} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt)}</span>
+      <span className="conversation-meta">{conversation.provider.name} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}</span>
     </button>)}
-    {!conversations.length && <p className="empty-list">No conversations match this search.</p>}
+    {!conversations.length && <p className="empty-list">{t("noMatches")}</p>}
   </nav>;
 }
