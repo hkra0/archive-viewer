@@ -4,8 +4,8 @@ A local-first reader for AI conversation exports. Files are processed in the bro
 
 ## Features
 
-- Drag-and-drop ZIP, JSON, Markdown, and folder import
-- ChatGPT and Claude adapters, plus generic JSON and Markdown fallbacks
+- Drag-and-drop ZIP, JSON, HTML, Markdown, and folder import
+- ChatGPT, Claude, Grok, DeepSeek, and Google Takeout Gemini adapters, plus generic JSON and Markdown fallbacks
 - Local groups with account/profile hints extracted from packaged exports when available
 - Persistent browser-local storage, full-text search, time ordering, Markdown, code highlighting, and image attachments
 - Re-import merging: identical messages are skipped, while conflicting content is preserved as a branch revision
@@ -32,4 +32,4 @@ Deploy the generated `dist` directory to Cloudflare Pages. No server-side databa
 
 ## Supported inputs
 
-The importer detects ChatGPT `conversations.json`, common Claude JSON exports, generic JSON collections, Markdown files, folders containing those files, and ZIP archives containing those formats. Gemini, DeepSeek, and Kimi exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.
+The importer detects ChatGPT `conversations.json`, common Claude JSON exports, Grok backend exports, DeepSeek fragment mappings, Google Takeout Gemini activity HTML, generic JSON collections, Markdown files, folders containing those files, and ZIP archives containing those formats. Other exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.

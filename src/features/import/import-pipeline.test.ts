@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasReadableConversationContent } from "./import-pipeline";
+import { hasReadableConversationContent, importFiles } from "./import-pipeline";
 import type { MessageContentBlock, UniversalConversation } from "../../domain/conversation";
 
 function conversation(content: MessageContentBlock[]): UniversalConversation {
@@ -16,5 +16,11 @@ describe("hasReadableConversationContent", () => {
   it("keeps text and attachment-backed conversations", () => {
     expect(hasReadableConversationContent(conversation([{ type: "markdown", markdown: "Hello" }]))).toBe(true);
     expect(hasReadableConversationContent(conversation([{ type: "image", attachmentId: "image" }]))).toBe(true);
+  });
+
+  it("allows ZIPs larger than the regular per-file limit", async () => {
+    const oversizedZipLikeFile = new File([new Uint8Array(26 * 1024 * 1024)], "export.zip");
+    const report = await importFiles([oversizedZipLikeFile]);
+    expect(report.errors[0]).not.toContain("25 MB safety limit");
   });
 });

@@ -3,8 +3,11 @@ import { chatGptAdapter } from "./chatgpt";
 import { claudeAdapter } from "./claude";
 import { genericJsonAdapter } from "./generic-json";
 import { genericMarkdownAdapter } from "./generic-markdown";
+import { deepSeekAdapter } from "./deepseek";
+import { geminiAdapter } from "./gemini";
+import { grokAdapter } from "./grok";
 
-const adapters: FormatAdapter[] = [chatGptAdapter, claudeAdapter, genericMarkdownAdapter, genericJsonAdapter];
+const adapters: FormatAdapter[] = [grokAdapter, deepSeekAdapter, geminiAdapter, chatGptAdapter, claudeAdapter, genericMarkdownAdapter, genericJsonAdapter];
 
 export function detectAdapter(input: ImportCandidate): { adapter: FormatAdapter; reason: string } | undefined {
   const match = adapters.map((adapter) => ({ adapter, result: adapter.detect(input) }))

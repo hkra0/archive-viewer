@@ -26,11 +26,13 @@ export interface ImportReport {
 }
 
 function isSupportedTextFile(name: string): boolean {
-  return /\.(json|md|markdown)$/i.test(name);
+  return /\.(json|md|markdown|html?)$/i.test(name);
 }
 
 function isAttachment(name: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg|pdf|txt)$/i.test(name);
+  return /\.(png|jpe?g|gif|webp|svg|pdf|txt|mp4|mov|webm)$/i.test(name)
+    || /\/prod-mc-asset-server\/\/[^/]+\/content$/i.test(name)
+    || !name.split("/").pop()?.includes(".");
 }
 
 function safePath(path: string): boolean {
@@ -169,8 +171,9 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
       errors.push(`${sourcePath}: unsafe path skipped.`);
       continue;
     }
-    if (file.size > IMPORT_LIMITS.maxFileBytes) {
-      errors.push(`${sourcePath}: file exceeds the ${IMPORT_LIMITS.maxFileBytes / 1024 / 1024} MB safety limit.`);
+    const fileLimit = /\.zip$/i.test(file.name) ? IMPORT_LIMITS.maxTotalFileBytes : IMPORT_LIMITS.maxFileBytes;
+    if (file.size > fileLimit) {
+      errors.push(`${sourcePath}: file exceeds the ${fileLimit / 1024 / 1024} MB safety limit.`);
       continue;
     }
     totalBytes += file.size;

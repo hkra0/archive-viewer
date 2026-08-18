@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { chatGptAdapter } from "./chatgpt";
 import { claudeAdapter, insertClaudeMissingPlaceholders } from "./claude";
 import { genericJsonAdapter } from "./generic-json";
+import { deepSeekAdapter } from "./deepseek";
+import { geminiAdapter } from "./gemini";
+import { grokAdapter } from "./grok";
 
 describe("conversation adapters", () => {
   it("normalises a generic JSON conversation", () => {
@@ -61,6 +64,42 @@ describe("conversation adapters", () => {
       parentMessageId: "01a00afb-e2ac-7428-a51e-48dafec32eb0",
       metadata: { missingFromExport: true, roleInferredFromChildren: true, parentInferredFromUuidTime: true },
     });
+  });
+
+  it("reads DeepSeek fragment mappings without mixing reasoning into the answer", () => {
+    const text = JSON.stringify([{ id: "deepseek-chat", title: "DeepSeek chat", mapping: {
+      root: { id: "root", parent: null, message: null },
+      one: { id: "one", parent: "root", message: { model: "deepseek-reasoner", inserted_at: "2026-08-01T10:00:00+08:00", fragments: [{ type: "REQUEST", content: "Question" }] } },
+      two: { id: "two", parent: "one", message: { model: "deepseek-reasoner", inserted_at: "2026-08-01T10:01:00+08:00", fragments: [{ type: "THINK", content: "Private reasoning" }, { type: "RESPONSE", content: "Answer" }] } },
+    } }]);
+    expect(deepSeekAdapter.detect({ name: "conversations.json", text }).supported).toBe(true);
+    const messages = deepSeekAdapter.parse({ name: "conversations.json", text }).conversations[0]!.messages;
+    expect(messages.map((message) => [message.role, message.parentMessageId, message.content])).toEqual([
+      ["user", undefined, [{ type: "markdown", markdown: "Question" }]],
+      ["assistant", "one", [{ type: "markdown", markdown: "Answer" }]],
+    ]);
+  });
+
+  it("reads nested Grok responses and MongoDB dates", () => {
+    const text = JSON.stringify({ conversations: [{ conversation: { id: "grok-chat", title: "Grok chat", create_time: "2026-08-01T10:00:00Z" }, responses: [
+      { response: { _id: "one", sender: "human", message: "Question", create_time: { $date: { $numberLong: "1785578400000" } } } },
+      { response: { _id: "two", sender: "assistant", message: "Answer", parent_response_id: "one", model: "grok-4" } },
+    ] }] });
+    expect(grokAdapter.detect({ name: "prod-grok-backend.json", text }).supported).toBe(true);
+    const result = grokAdapter.parse({ name: "prod-grok-backend.json", text }).conversations[0]!;
+    expect(result.messages.map((message) => [message.role, message.parentMessageId])).toEqual([["user", undefined], ["assistant", "one"]]);
+    expect(result.metadata.modelNames).toEqual(["grok-4"]);
+  });
+
+  it("groups Gemini Takeout activities by source conversation", () => {
+    const html = `<html><body><div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">Prompted&nbsp;First question<br>2026年6月19日 12:23:08 CST<br><p>First answer</p></div><div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1 mdl-typography--text-right"></div><div class="content-cell mdl-cell mdl-cell--12-col mdl-typography--caption">https://gemini.google.com/app/chat-1</div></body></html>`;
+    expect(geminiAdapter.detect({ name: "Gemini Apps/activity.html", text: html }).supported).toBe(true);
+    const result = geminiAdapter.parse({ name: "Gemini Apps/activity.html", text: html }).conversations[0]!;
+    expect(result.metadata).toMatchObject({ title: "First question", sourceConversationId: "chat-1" });
+    expect(result.messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", [{ type: "markdown", markdown: "First question" }]],
+      ["assistant", [{ type: "markdown", markdown: "First answer" }]],
+    ]);
   });
 
 });
