@@ -148,29 +148,29 @@ export function ConversationReader({ conversation, onGoHome }: { conversation?: 
     }
   };
   return <main className="reader">
-    <header className="reader-header">
-      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{onGoHome ? <button type="button" className="reader-home-title" onClick={onGoHome} title={t("backHome")}>{conversation.metadata.title}</button> : conversation.metadata.title}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
-      <div className="reader-actions">
-        <div className="export-control" ref={exportControl}>
-          <button className="quiet-button export-button" type="button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>{t("export")}</button>
-        {exportOpen && <section className="copy-panel" aria-label="导出当前对话分支">
-          <div className="copy-panel-heading"><div><h2>{t("copyBranch")}</h2><p>{t("copyBranchHint")}</p></div><button className="copy-button" type="button" onClick={() => void copyCurrentBranch()}>{copyStatus === "copied" ? t("copied") : copyStatus === "error" ? t("copyFailed") : t("copyConversation")}</button></div>
-          <fieldset>
-            <legend>{t("include")}</legend>
-            <label><input type="checkbox" checked={copyOptions.includeTitle} onChange={(event) => setCopyOption("includeTitle", event.target.checked)} /> {t("title")}</label>
-            <label><input type="checkbox" checked={copyOptions.includeRoles} onChange={(event) => setCopyOption("includeRoles", event.target.checked)} /> {t("roles")}</label>
-            <label><input type="checkbox" checked={copyOptions.includeTimestamps} onChange={(event) => setCopyOption("includeTimestamps", event.target.checked)} /> {t("timestamps")}</label>
-            <label><input type="checkbox" checked={copyOptions.includeModels} onChange={(event) => setCopyOption("includeModels", event.target.checked)} /> {t("models")}</label>
-            <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> {t("missingPlaceholders")}</label>
-            <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> {t("continuation")}</label>
-          </fieldset>
-          {copyOptions.includeContinuationPrompt && <div className="continuation-prompt">
-            <div className="continuation-prompt-heading"><label htmlFor="continuation-prompt">{t("continuation")}</label><button type="button" className="text-button" onClick={() => { setCopyOptions((current) => ({ ...current, continuationPrompt: continuationPromptForLocale(locale) })); setContinuationPromptEdited(false); }}>{t("restoreDefault")}</button></div>
-            <textarea id="continuation-prompt" value={copyOptions.continuationPrompt} onChange={(event) => { setCopyOptions((current) => ({ ...current, continuationPrompt: event.target.value })); setContinuationPromptEdited(true); setCopyStatus("idle"); }} rows={6} spellCheck={false} />
-          </div>}
-        </section>}
-        </div>
+    <div className="reader-actions">
+      <div className="export-control" ref={exportControl}>
+        <button className="quiet-button export-button" type="button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>{t("export")}</button>
+      {exportOpen && <section className="copy-panel" aria-label="导出当前对话分支">
+        <div className="copy-panel-heading"><div><h2>{t("copyBranch")}</h2><p>{t("copyBranchHint")}</p></div><button className="copy-button" type="button" onClick={() => void copyCurrentBranch()}>{copyStatus === "copied" ? t("copied") : copyStatus === "error" ? t("copyFailed") : t("copyConversation")}</button></div>
+        <fieldset>
+          <legend>{t("include")}</legend>
+          <label><input type="checkbox" checked={copyOptions.includeTitle} onChange={(event) => setCopyOption("includeTitle", event.target.checked)} /> {t("title")}</label>
+          <label><input type="checkbox" checked={copyOptions.includeRoles} onChange={(event) => setCopyOption("includeRoles", event.target.checked)} /> {t("roles")}</label>
+          <label><input type="checkbox" checked={copyOptions.includeTimestamps} onChange={(event) => setCopyOption("includeTimestamps", event.target.checked)} /> {t("timestamps")}</label>
+          <label><input type="checkbox" checked={copyOptions.includeModels} onChange={(event) => setCopyOption("includeModels", event.target.checked)} /> {t("models")}</label>
+          <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> {t("missingPlaceholders")}</label>
+          <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> {t("continuation")}</label>
+        </fieldset>
+        {copyOptions.includeContinuationPrompt && <div className="continuation-prompt">
+          <div className="continuation-prompt-heading"><label htmlFor="continuation-prompt">{t("continuation")}</label><button type="button" className="text-button" onClick={() => { setCopyOptions((current) => ({ ...current, continuationPrompt: continuationPromptForLocale(locale) })); setContinuationPromptEdited(false); }}>{t("restoreDefault")}</button></div>
+          <textarea id="continuation-prompt" value={copyOptions.continuationPrompt} onChange={(event) => { setCopyOptions((current) => ({ ...current, continuationPrompt: event.target.value })); setContinuationPromptEdited(true); setCopyStatus("idle"); }} rows={6} spellCheck={false} />
+        </div>}
+      </section>}
       </div>
+    </div>
+    <header className="reader-header">
+      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{onGoHome ? <button type="button" className="reader-home-title" onClick={onGoHome} aria-label={`${t("backHome")}: ${conversation.metadata.title}`} title={conversation.metadata.title}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
     </header>
     <section className="messages" aria-label={t("messages")}>
       {renderPath(messages, tree.roots, ROOT_SELECTION_KEY)}

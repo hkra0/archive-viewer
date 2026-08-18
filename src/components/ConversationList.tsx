@@ -17,7 +17,7 @@ export function ConversationList({ conversations, selectedId, onSelect }: Conver
       key={conversation.id}
       onClick={() => onSelect(conversation.id)}
     >
-      <span className="conversation-title">{conversation.metadata.title}</span>
+      <span className="conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>
       <span className="conversation-meta">{conversation.provider.name} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}</span>
     </button>)}
     {!conversations.length && <p className="empty-list">{t("noMatches")}</p>}

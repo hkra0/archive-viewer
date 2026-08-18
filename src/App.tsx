@@ -7,8 +7,7 @@ import { GroupSwitcher } from "./components/GroupSwitcher";
 import { Icon } from "./components/Icons";
 import { TinykoMark } from "./components/TinykoMark";
 import { importEntries, type ImportReport } from "./features/import/import-pipeline";
-import { mergeImportIntoGroup } from "./features/groups/group-import";
-import { resolveImportDestination } from "./features/groups/group-resolution";
+import { mergeImportIntoGroup, suggestedGroupName } from "./features/groups/group-import";
 import { clearAllStoredData, deleteGroup, listGroups, loadGroup, revokeConversationUrls, saveGroup } from "./features/groups/group-store";
 import type { ConversationGroup, GroupData } from "./features/groups/group-types";
 import { createId } from "./lib/ids";
@@ -19,8 +18,10 @@ import { readThemePreference, resolvedTheme, THEME_STORAGE_KEY, type ThemePrefer
 
 type DialogKind = "create" | "rename";
 type GroupFormValues = { name: string; note?: string };
-type PendingImport = { report: ImportReport; recommendedGroupId?: string };
+type PendingImport = { report: ImportReport; defaultGroupName: string };
 const SIDEBAR_COLLAPSED_KEY = "archive-viewer.sidebar-collapsed";
+const FEEDBACK_DURATION_MS = 6000;
+const FEEDBACK_FADE_DURATION_MS = 2000;
 
 function chronological(conversations: UniversalConversation[]): UniversalConversation[] {
   return [...conversations].sort((a, b) => new Date(b.metadata.updatedAt ?? b.metadata.createdAt ?? 0).getTime() - new Date(a.metadata.updatedAt ?? a.metadata.createdAt ?? 0).getTime());
@@ -48,26 +49,57 @@ function ManagementDialog({ kind, initialName, initialNote, onCancel, onConfirm 
   </form></div>;
 }
 
-function ImportDestinationDialog({ pending, groups, onCancel, onConfirm }: { pending: PendingImport; groups: ConversationGroup[]; onCancel(): void; onConfirm(groupId?: string): void }) {
+function ImportDestinationDialog({ pending, groups, onCancel, onConfirm }: { pending: PendingImport; groups: ConversationGroup[]; onCancel(): void; onConfirm(groupId?: string, newGroupName?: string): void }) {
   const { t } = useI18n();
-  const [target, setTarget] = useState(pending.recommendedGroupId || "new");
-  return <div className="dialog-backdrop" role="presentation"><form className="management-dialog import-destination-dialog" role="dialog" aria-modal="true" aria-labelledby="import-destination-title" onSubmit={(event) => { event.preventDefault(); onConfirm(target === "new" ? undefined : target); }}>
+  const [target, setTarget] = useState("new");
+  const [newGroupName, setNewGroupName] = useState(pending.defaultGroupName);
+  return <div className="dialog-backdrop" role="presentation"><form className="management-dialog import-destination-dialog" role="dialog" aria-modal="true" aria-labelledby="import-destination-title" onSubmit={(event) => { event.preventDefault(); if (target === "new" && !newGroupName.trim()) return; onConfirm(target === "new" ? undefined : target, target === "new" ? newGroupName.trim() : undefined); }}>
     <h2 id="import-destination-title">{t("importDestination")}</h2><p>{t("importDestinationHint")}</p>
     {pending.report.account && <p className="import-profile">{[pending.report.account.displayName, pending.report.account.email].filter(Boolean).join(" · ")}</p>}
-    <label className="destination-option"><input type="radio" name="destination" value="new" checked={target === "new"} onChange={() => setTarget("new")} />{t("createNewGroup")}</label>
-    <label className="destination-option"><input type="radio" name="destination" value="existing" checked={target !== "new"} onChange={() => setTarget(pending.recommendedGroupId || groups[0]?.id || "new")} />{t("mergeInto")}</label>
-    {target !== "new" && <select value={target} onChange={(event) => setTarget(event.target.value)} aria-label={t("groups")}>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}{group.id === pending.recommendedGroupId ? ` · ${t("recommended")}` : ""}</option>)}</select>}
+    <div className="destination-tabs" role="tablist" aria-label={t("importDestination")}>
+      <button type="button" role="tab" id="destination-new-tab" aria-selected={target === "new"} aria-controls="destination-new-panel" className={target === "new" ? "active" : ""} onClick={() => setTarget("new")}>{t("createNewGroup")}</button>
+      <button type="button" role="tab" id="destination-existing-tab" aria-selected={target !== "new"} aria-controls="destination-existing-panel" className={target !== "new" ? "active" : ""} onClick={() => setTarget(groups[0]?.id || "new")}>{t("mergeInto")}</button>
+    </div>
+    {target === "new" ? <div className="destination-panel" id="destination-new-panel" role="tabpanel" aria-labelledby="destination-new-tab"><label>{t("groupName")}<input autoFocus value={newGroupName} maxLength={80} required onChange={(event) => setNewGroupName(event.target.value)} /></label></div> : <div className="destination-panel" id="destination-existing-panel" role="tabpanel" aria-labelledby="destination-existing-tab"><label>{t("groups")}<select value={target} onChange={(event) => setTarget(event.target.value)}>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label></div>}
     <div className="dialog-actions"><button type="button" className="text-button" onClick={onCancel}>{t("cancel")}</button><button type="submit" className="primary-button">{t("importNow")}</button></div>
   </form></div>;
 }
 
 function ImportHome({ embedded, importing, onImport, onResume, errors = [], warnings = [], onDismiss }: { embedded?: boolean; importing: boolean; onImport(selection: ImportSelection): void; onResume?(): void; errors?: string[]; warnings?: ImportWarning[]; onDismiss?(kind: "error" | "warning", index: number): void }) {
   const { t } = useI18n();
-  return <main className={`welcome${embedded ? " workspace-welcome" : ""}`}><header className="home-header"><h1>archive viewer</h1></header><section className="welcome-copy"><ImportDropzone disabled={importing} onImport={onImport} />{onResume && <button type="button" className="text-button resume-button" onClick={onResume}>{t("resume")}</button>}{!embedded && <ImportFeedback errors={errors} warnings={warnings} onDismiss={onDismiss} />}</section></main>;
+  return <main className={`welcome${embedded ? " workspace-welcome" : ""}`}><header className="home-header"><h1>archive viewer</h1></header><section className="welcome-copy"><ImportDropzone disabled={importing} onImport={onImport} />{onResume && <button type="button" className="text-button resume-button" onClick={onResume}>{t("resume")}</button>}{!embedded && <FeedbackQueue floating errors={errors} warnings={warnings} onDismiss={onDismiss} />}</section></main>;
+}
+
+function TransientNotice({ children, onDismiss, active = true, durationMs = FEEDBACK_DURATION_MS }: { children: React.ReactNode; onDismiss(): void; active?: boolean; durationMs?: number }) {
+  const [fading, setFading] = useState(false);
+  const [interrupted, setInterrupted] = useState(false);
+  const fadeTimer = useRef<number | undefined>(undefined);
+  const dismissTimer = useRef<number | undefined>(undefined);
+  const durationRef = useRef(durationMs);
+  const resumeFadeOnLeave = useRef(false);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  function clearTimers(): void { window.clearTimeout(fadeTimer.current); window.clearTimeout(dismissTimer.current); }
+  function startFading(): void {
+    clearTimers(); setFading(true);
+    dismissTimer.current = window.setTimeout(() => onDismissRef.current(), FEEDBACK_FADE_DURATION_MS);
+  }
+  function scheduleFade(delayMs = durationMs): void {
+    clearTimers(); fadeTimer.current = window.setTimeout(startFading, delayMs);
+  }
+
+  useEffect(() => { clearTimers(); resumeFadeOnLeave.current = false; setInterrupted(false); setFading(false); if (active) scheduleFade(durationRef.current); return clearTimers; }, [active]);
+
+  return <div
+    className={`transient-notice${active ? " is-active" : ""}${fading ? " is-fading" : ""}${interrupted ? " is-interrupted" : ""}`}
+    onMouseEnter={() => { if (!active) return; resumeFadeOnLeave.current = fading; clearTimers(); setInterrupted(fading); setFading(false); }}
+    onMouseLeave={() => { if (!active) return; if (resumeFadeOnLeave.current) { resumeFadeOnLeave.current = false; setInterrupted(false); startFading(); } else scheduleFade(durationRef.current); }}
+  >{children}</div>;
 }
 
 export default function App() {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const { route, navigate } = useAppRouter();
   const [groups, setGroups] = useState<ConversationGroup[]>([]);
   const [active, setActive] = useState<GroupData>();
@@ -99,16 +131,6 @@ export default function App() {
     if (theme !== "system") return undefined;
     media.addEventListener("change", apply); return () => media.removeEventListener("change", apply);
   }, [theme]);
-  useEffect(() => {
-    if (!warnings.some((warning) => warning.code === "IMPORT_MERGED")) return undefined;
-    const timeout = window.setTimeout(() => setWarnings((current) => current.filter((warning) => warning.code !== "IMPORT_MERGED")), 6000);
-    return () => window.clearTimeout(timeout);
-  }, [warnings]);
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timeout = window.setTimeout(() => setToast(undefined), 3000);
-    return () => window.clearTimeout(timeout);
-  }, [toast]);
   useEffect(() => {
     let cancelled = false;
     async function restore(): Promise<void> {
@@ -166,11 +188,11 @@ export default function App() {
   async function selectGroup(groupId: string): Promise<void> { const exists = await activateGroup(groupId); if (exists) navigate({ kind: "group", groupId }); }
   function showImportHome(): void { navigate({ kind: "home" }); setShowHome(true); setSidebarOpen(false); }
 
-  async function commitImport(report: ImportReport, targetGroupId?: string): Promise<void> {
+  async function commitImport(report: ImportReport, targetGroupId?: string, newGroupName?: string): Promise<void> {
     setImporting(true); let temporaryConversations = report.archive.conversations;
     try {
       const target = targetGroupId ? targetGroupId === active?.group.id ? active : await loadGroup(targetGroupId) : undefined;
-      const result = mergeImportIntoGroup(target, report);
+      const result = mergeImportIntoGroup(target, report, newGroupName, locale);
       await saveGroup({ group: result.group, conversations: result.conversations }, result.batch);
       const persisted = await loadGroup(result.group.id); if (!persisted) throw new Error("Imported group could not be read.");
       revokeConversationUrls(temporaryConversations); temporaryConversations = [];
@@ -189,9 +211,9 @@ export default function App() {
       const formattedWarnings = report.warnings.map((warning) => warning.code === "EMPTY_CONVERSATION_SKIPPED" ? { ...warning, message: t("importSkippedEmpty", { count: warning.message }) } : warning);
       setWarnings(formattedWarnings); setErrors(report.errors);
       if (!report.archive.conversations.length) return;
-      const destination = resolveImportDestination(report, groups, active);
-      if (destination.requiresConfirmation) { setPendingImport({ report, recommendedGroupId: destination.recommendedGroupId }); return; }
-      await commitImport(report, destination.recommendedGroupId);
+      const needsDestinationChoice = groups.length > 0;
+      if (needsDestinationChoice) { setPendingImport({ report, defaultGroupName: suggestedGroupName(report, locale) }); return; }
+      await commitImport(report);
     } catch (error) { setErrors((current) => [...current, error instanceof Error ? error.message : "Import failed."]); }
     finally { setImporting(false); }
   }
@@ -262,16 +284,25 @@ export default function App() {
         </div>
         <GroupSwitcher activeGroup={active.group} groups={groups} onSelect={(id) => void selectGroup(id)} onCreate={() => setDialog("create")} onRename={(id) => { setEditingGroupId(id); setDialog("rename"); }} onDelete={(id) => void removeGroup(id)} onClearAll={() => void clearAll()} onToast={showToast} theme={theme} onThemeChange={setTheme} />
       </aside>
-      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span>{showHome ? t("home") : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : <ConversationReader conversation={selected} onGoHome={showImportHome} />}</div>
-      {(errors.length > 0 || warnings.length > 0) && <div className="feedback-float"><ImportFeedback errors={errors} warnings={warnings} onDismiss={dismissFeedback} /></div>}
+      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span title={showHome ? t("home") : selected?.metadata.title || active.group.name}>{showHome ? t("home") : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : <ConversationReader conversation={selected} onGoHome={showImportHome} />}</div>
+      {(errors.length > 0 || warnings.length > 0) && <FeedbackQueue floating errors={errors} warnings={warnings} onDismiss={dismissFeedback} />}
     </div>}
     {dialog && <ManagementDialog key={`${dialog}-${editingGroupId || "new"}`} kind={dialog} initialName={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.name || "" : ""} initialNote={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.note || groups.find((group) => group.id === editingGroupId)?.account?.email || "" : ""} onCancel={() => { setEditingGroupId(undefined); setDialog(undefined); }} onConfirm={confirmDialog} />}
-    {pendingImport && <ImportDestinationDialog pending={pendingImport} groups={groups} onCancel={() => setPendingImport(undefined)} onConfirm={(groupId) => { const report = pendingImport.report; setPendingImport(undefined); void commitImport(report, groupId); }} />}
-    {toast && <div className="action-toast" role="status">{toast}</div>}
+    {pendingImport && <ImportDestinationDialog pending={pendingImport} groups={groups} onCancel={() => setPendingImport(undefined)} onConfirm={(groupId, newGroupName) => { const report = pendingImport.report; setPendingImport(undefined); void commitImport(report, groupId, newGroupName); }} />}
+    {toast && <TransientNotice key={toast} onDismiss={() => setToast(undefined)}><div className="action-toast" role="status">{toast}</div></TransientNotice>}
   </div>;
 }
 
-function ImportFeedback({ errors, warnings, onDismiss }: { errors: string[]; warnings: ImportWarning[]; onDismiss?(kind: "error" | "warning", index: number): void }) {
-  if (!errors.length && !warnings.length) return null;
-  return <section className="import-feedback" aria-live="polite">{errors.map((error, index) => <p className="error" key={`${error}-${index}`}><span>{error}</span>{onDismiss && <button className="feedback-dismiss" type="button" aria-label="Close" onClick={() => onDismiss("error", index)}>×</button>}</p>)}{warnings.map((warning, index) => <p className="warning" key={`${warning.code}-${index}`}><span>{warning.message}</span>{onDismiss && <button className="feedback-dismiss" type="button" aria-label="Close" onClick={() => onDismiss("warning", index)}>×</button>}</p>)}</section>;
+function FeedbackMessage({ kind, message, onDismiss }: { kind: "error" | "warning" | "info"; message: string; onDismiss?(): void }) {
+  return <p className={kind}><span>{message}</span>{onDismiss && <button className="feedback-dismiss" type="button" aria-label="Close" onClick={onDismiss}>×</button>}</p>;
+}
+
+function FeedbackQueue({ errors, warnings, onDismiss, floating }: { errors: string[]; warnings: ImportWarning[]; onDismiss?(kind: "error" | "warning", index: number): void; floating?: boolean }) {
+  const notices = [
+    ...errors.map((message, index) => ({ id: `error-${index}-${message}`, kind: "error" as const, message, onDismiss: onDismiss ? () => onDismiss("error", index) : undefined })),
+    ...warnings.map((warning, index) => ({ id: `warning-${index}-${warning.code}-${warning.message}`, kind: warning.code === "IMPORT_MERGED" ? "info" as const : "warning" as const, message: warning.message, onDismiss: onDismiss ? () => onDismiss("warning", index) : undefined })),
+  ];
+  if (!notices.length) return null;
+  const queue = <section className="import-feedback feedback-queue" aria-live="polite">{notices.map((notice, index) => <TransientNotice key={notice.id} active={index === notices.length - 1} durationMs={index === notices.length - 1 ? FEEDBACK_DURATION_MS : 3000} onDismiss={() => notice.onDismiss?.()}><FeedbackMessage kind={notice.kind} message={notice.message} onDismiss={notice.onDismiss} /></TransientNotice>)}</section>;
+  return floating ? <div className="feedback-float">{queue}</div> : queue;
 }
