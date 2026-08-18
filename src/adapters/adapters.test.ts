@@ -66,6 +66,27 @@ describe("conversation adapters", () => {
     });
   });
 
+  it("preserves Claude text fallbacks, thinking, tools, empty messages, and attachment metadata", () => {
+    const result = claudeAdapter.parse({
+      name: "conversations.json",
+      text: JSON.stringify([{ uuid: "conversation-rich", name: "Rich export", chat_messages: [
+        { uuid: "fallback", sender: "human", text: "Text survives", content: [] },
+        { uuid: "rich", sender: "assistant", content: [
+          { type: "thinking", thinking: "Reasoning", summaries: [{ summary: "Plan" }] },
+          { type: "tool_use", name: "search", input: { q: "archive" } },
+          { type: "tool_result", content: "Found", is_error: false },
+          { type: "future_block", payload: 1 },
+        ], attachments: [{ uuid: "file-1", file_name: "notes.md", file_type: "text/markdown", extracted_content: "# Notes" }] },
+        { uuid: "empty", sender: "assistant", content: [], text: "" },
+      ] }]),
+    });
+    const conversation = result.conversations[0]!;
+    expect(conversation.messages[0]!.content).toEqual([{ type: "markdown", markdown: "Text survives" }]);
+    expect(conversation.messages[1]!.content.map((block) => block.type)).toEqual(["thinking", "tool-call", "tool-result", "unknown", "file"]);
+    expect(conversation.messages[2]!.content[0]!.type).toBe("empty");
+    expect(conversation.attachments[0]).toMatchObject({ id: "file-1", name: "notes.md", textContent: "# Notes" });
+  });
+
   it("reads DeepSeek fragment mappings without mixing reasoning into the answer", () => {
     const text = JSON.stringify([{ id: "deepseek-chat", title: "DeepSeek chat", mapping: {
       root: { id: "root", parent: null, message: null },

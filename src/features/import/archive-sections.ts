@@ -74,12 +74,34 @@ function itemFromRecord(value: JsonRecord, kind: ArchiveSection["kind"]): Archiv
   };
 }
 
+function claudeProjectItem(value: JsonRecord): ArchiveRecord {
+  const documents = [value.docs, value.documents, value.knowledge_docs, value.files]
+    .find((candidate) => Array.isArray(candidate)) as unknown[] | undefined;
+  const documentText = (documents || []).flatMap((candidate, index) => {
+    const item = record(candidate);
+    if (!item) return [];
+    const title = first(item, ["file_name", "filename", "name", "title"]) || `Document ${index + 1}`;
+    const body = first(item, ["content", "text", "extracted_content"]);
+    return body ? [`## ${title}\n\n${body}`] : [`## ${title}`];
+  }).join("\n\n");
+  const prompt = first(value, ["prompt_template", "instructions", "prompt", "description"]);
+  return {
+    id: first(value, ["uuid", "id", "project_uuid"]) || createId("projects"),
+    title: first(value, ["name", "title"]) || "Untitled project",
+    body: [prompt, documentText].filter(Boolean).join("\n\n") || undefined,
+    fields: first(value, ["uuid", "id", "project_uuid"]) ? { "Project ID": first(value, ["uuid", "id", "project_uuid"])! } : undefined,
+    createdAt: toIsoDate(value.created_at ?? value.createdAt),
+    updatedAt: toIsoDate(value.updated_at ?? value.updatedAt),
+  };
+}
+
 function jsonSections(candidate: ImportCandidate, parsed: unknown): ArchiveSection[] {
   const name = candidate.name;
   const providerId = providerFromName(name);
   const lower = name.toLowerCase();
   const result: ArchiveSection[] = [];
   const values = Array.isArray(parsed) ? parsed : [parsed];
+  const root = record(parsed);
 
   if (/(?:^|\/)(?:users?|account|profile|user[_-]?info)\.json$/i.test(name) || /auth-mgmt-api\.json$/i.test(name)) {
     const items = values.map(record).filter((item): item is JsonRecord => Boolean(item)).map(profileItem).filter((item): item is ArchiveRecord => Boolean(item));
@@ -92,13 +114,24 @@ function jsonSections(candidate: ImportCandidate, parsed: unknown): ArchiveSecti
       if (direct) return [{ id: createId("memory"), body: direct }];
       const item = record(value);
       if (!item) return [];
+      const result: ArchiveRecord[] = [];
       const body = first(item, ["conversations_memory", "saved_info", "savedInfo", "memory", "content", "text"]);
-      return body ? [{ id: first(item, ["id", "uuid", "account_uuid"]) || createId("memory"), body }] : [];
+      if (body) result.push({ id: first(item, ["id", "uuid", "account_uuid"]) || createId("memory"), title: "Global memory", body });
+      const projectMemories = record(item.project_memories);
+      if (projectMemories) Object.entries(projectMemories).forEach(([projectId, memory]) => {
+        const memoryRecord = record(memory);
+        const memoryBody = text(memory) || (memoryRecord && first(memoryRecord, ["memory", "content", "text"]));
+        if (memoryBody) result.push({ id: `project-memory-${projectId}`, title: memoryRecord && first(memoryRecord, ["project_name", "name", "title"]) || `Project ${projectId}`, body: memoryBody, fields: { "Project ID": projectId } });
+      });
+      return result;
     });
     if (items.length) result.push({ id: `${providerId || "archive"}-memories`, kind: "memories", providerId, items });
   }
 
-  const root = record(parsed);
+  if (/(?:^|\/)projects\/[0-9a-f-]+\.json$/i.test(name) && root && ("prompt_template" in root || "uuid" in root)) {
+    result.push({ id: "claude-projects", kind: "projects", providerId: "claude", items: [claudeProjectItem(root)] });
+  }
+
   const addCollection = (key: string, kind: ArchiveSection["kind"]) => {
     const collection = root && Array.isArray(root[key]) ? root[key] as unknown[] : lower.endsWith(`/${key}.json`) || lower === `${key}.json` ? values : [];
     const items = collection.map(record).filter((item): item is JsonRecord => Boolean(item)).map((item) => itemFromRecord(item, kind));

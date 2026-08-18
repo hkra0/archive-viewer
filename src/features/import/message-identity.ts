@@ -24,8 +24,10 @@ function stableBlock(block: MessageContentBlock): unknown {
   if (block.type === "code") return { type: block.type, code: normaliseText(block.code), language: block.language || "" };
   if (block.type === "image") return { type: block.type, attachmentId: block.attachmentId, alt: block.alt || "" };
   if (block.type === "file") return { type: block.type, attachmentId: block.attachmentId };
+  if (block.type === "thinking") return { type: block.type, thinking: normaliseText(block.thinking), summaries: block.summaries || [] };
   if (block.type === "tool-call") return { type: block.type, name: block.name, input: block.input };
-  if (block.type === "tool-result") return { type: block.type, name: block.name || "", output: block.output };
+  if (block.type === "tool-result") return { type: block.type, name: block.name || "", output: block.output, isError: block.isError || false };
+  if (block.type === "empty") return { type: block.type, reason: block.reason || "" };
   return { type: block.type, raw: block.raw };
 }
 

@@ -60,6 +60,8 @@ function isReadableBlock(block: MessageContentBlock): boolean {
   if (block.type === "text") return Boolean(block.text.trim());
   if (block.type === "markdown") return Boolean(block.markdown.trim());
   if (block.type === "code") return Boolean(block.code.trim());
+  if (block.type === "thinking") return Boolean(block.thinking.trim());
+  if (block.type === "tool-call" || block.type === "tool-result") return true;
   return block.type === "image" || block.type === "file";
 }
 
@@ -170,7 +172,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
   const scopedEntries = entries.slice(0, IMPORT_LIMITS.maxFiles);
   const directAttachments = folderAttachments(scopedEntries);
   let account: ImportedAccountProfile | undefined;
-  let skippedEmptyConversations = 0;
+  let preservedEmptyConversations = 0;
   const sourceType: ImportSourceType = entries.some(({ file }) => /\.zip$/i.test(file.name)) ? "zip" : selectionType;
 
   if (entries.length > IMPORT_LIMITS.maxFiles) errors.push(`Only the first ${IMPORT_LIMITS.maxFiles} files can be imported at once.`);
@@ -205,9 +207,8 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
         account = combineAccountProfile(account, combineAccountProfile(profile, accountProfileFromSections(extractedSections)));
         if (isAccountOnlyCandidate(candidate, profile)) continue;
         const result = parseCandidate(candidate);
-        const readable = result.conversations.filter(hasReadableConversationContent);
-        skippedEmptyConversations += result.conversations.length - readable.length;
-        conversations.push(...readable);
+        preservedEmptyConversations += result.conversations.filter((conversation) => !hasReadableConversationContent(conversation)).length;
+        conversations.push(...result.conversations);
         warnings.push(...result.warnings);
         if (result.error && !extractedSections.length) errors.push(result.error);
       }
@@ -215,7 +216,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
       errors.push(`${sourcePath}: ${error instanceof Error ? error.message : "Could not read file."}`);
     }
   }
-  if (skippedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATION_SKIPPED", message: String(skippedEmptyConversations) });
+  if (preservedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATIONS_PRESERVED", message: String(preservedEmptyConversations) });
   const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations, sections });
   return { archive, warnings, errors, sourceType, account };
 }

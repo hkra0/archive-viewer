@@ -7,6 +7,15 @@ describe("extractArchiveSections", () => {
     expect(sections).toMatchObject([{ kind: "memories", items: [{ id: "account-1", body: "The user prefers concise answers." }] }]);
   });
 
+  it("extracts project memories and UUID-named project files", () => {
+    const memories = extractArchiveSections({ name: "memories.json", text: JSON.stringify([{ conversations_memory: "Global", project_memories: { "project-1": "Project context" } }]) });
+    expect(memories[0]?.items.map((item) => item.body)).toEqual(["Global", "Project context"]);
+    const projects = extractArchiveSections({ name: "projects/123e4567-e89b-12d3-a456-426614174000.json", text: JSON.stringify({ uuid: "project-1", name: "Research", prompt_template: "Be rigorous", docs: [{ file_name: "brief.md", content: "Evidence" }] }) });
+    expect(projects[0]).toMatchObject({ kind: "projects", providerId: "claude" });
+    expect(projects[0]?.items[0]?.body).toContain("Be rigorous");
+    expect(projects[0]?.items[0]?.body).toContain("Evidence");
+  });
+
   it("extracts an allow-listed profile rather than exposing arbitrary account fields", () => {
     const sections = extractArchiveSections({ name: "users.json", text: JSON.stringify([{ uuid: "user-1", full_name: "Ada", email_address: "ada@example.com", auth_token: "secret" }]) });
     expect(sections[0]?.items[0]?.fields).toEqual({ Name: "Ada", Email: "ada@example.com", "User ID": "user-1" });

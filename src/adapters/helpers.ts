@@ -26,11 +26,17 @@ export function blocksFromUnknown(value: unknown): MessageContentBlock[] {
       if (key in object) return blocksFromUnknown(object[key]);
     }
   }
+  if (value == null || Array.isArray(value) && value.length === 0) return [{ type: "empty" }];
   return [{ type: "unknown", raw: value }];
 }
 
 export function makeMessage(source: Record<string, unknown>): UniversalMessage {
-  const content = source.content ?? source.text ?? source.parts ?? source.message ?? "";
+  const structured = source.content ?? source.parts ?? source.message;
+  const structuredBlocks = blocksFromUnknown(structured);
+  const content = structuredBlocks.every((block) => block.type === "empty" || block.type === "unknown")
+    && typeof source.text === "string" && source.text.trim()
+    ? source.text
+    : structured ?? source.text ?? "";
   const rawAuthor = source.role ?? source.sender ?? source.author;
   const author = rawAuthor && typeof rawAuthor === "object" ? (rawAuthor as Record<string, unknown>).role : rawAuthor;
   const sourceMessageId = typeof source.uuid === "string" ? source.uuid : typeof source.id === "string" ? source.id : undefined;

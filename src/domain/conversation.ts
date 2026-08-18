@@ -10,8 +10,10 @@ export const MessageContentBlockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("code"), code: z.string(), language: z.string().optional() }),
   z.object({ type: z.literal("image"), attachmentId: z.string(), alt: z.string().optional() }),
   z.object({ type: z.literal("file"), attachmentId: z.string() }),
+  z.object({ type: z.literal("thinking"), thinking: z.string(), summaries: z.array(z.string()).optional() }),
   z.object({ type: z.literal("tool-call"), name: z.string(), input: z.unknown().optional() }),
-  z.object({ type: z.literal("tool-result"), name: z.string().optional(), output: z.unknown() }),
+  z.object({ type: z.literal("tool-result"), name: z.string().optional(), output: z.unknown(), isError: z.boolean().optional() }),
+  z.object({ type: z.literal("empty"), reason: z.string().optional() }),
   z.object({ type: z.literal("unknown"), raw: z.unknown() }),
 ]);
 export type MessageContentBlock = z.infer<typeof MessageContentBlockSchema>;
