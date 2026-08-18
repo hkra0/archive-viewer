@@ -81,6 +81,25 @@ export const UniversalConversationSchema = z.object({
 });
 export type UniversalConversation = z.infer<typeof UniversalConversationSchema>;
 
+export const ArchiveRecordSchema = z.object({
+  id: z.string(),
+  title: z.string().optional(),
+  body: z.string().optional(),
+  fields: z.record(z.string(), z.string()).optional(),
+  createdAt: z.string().datetime().optional(),
+  updatedAt: z.string().datetime().optional(),
+});
+export type ArchiveRecord = z.infer<typeof ArchiveRecordSchema>;
+
+export const ArchiveSectionSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["profile", "projects", "memories", "tasks", "assistants", "instructions", "other"]),
+  title: z.string().optional(),
+  providerId: z.string().optional(),
+  items: z.array(ArchiveRecordSchema),
+});
+export type ArchiveSection = z.infer<typeof ArchiveSectionSchema>;
+
 export const ConversationArchiveSchema = z.object({
   schemaVersion: z.literal("1.0"),
   exportedAt: z.string().datetime().optional(),
@@ -91,6 +110,7 @@ export const ConversationArchiveSchema = z.object({
     lastModified: z.number().optional(),
   })),
   conversations: z.array(UniversalConversationSchema),
+  sections: z.array(ArchiveSectionSchema).optional(),
 });
 export type ConversationArchive = z.infer<typeof ConversationArchiveSchema>;
 

@@ -1,4 +1,4 @@
-import type { UniversalConversation } from "../../domain/conversation";
+import type { ArchiveSection, UniversalConversation } from "../../domain/conversation";
 import type { MergeStats } from "../import/merge-conversations";
 
 export interface GroupAccount {
@@ -28,11 +28,13 @@ export interface ImportBatch {
 export interface GroupData {
   group: ConversationGroup;
   conversations: UniversalConversation[];
+  sections: ArchiveSection[];
 }
 
 export interface GroupImportResult {
   group: ConversationGroup;
   conversations: UniversalConversation[];
+  sections: ArchiveSection[];
   batch: ImportBatch;
   stats: MergeStats;
 }

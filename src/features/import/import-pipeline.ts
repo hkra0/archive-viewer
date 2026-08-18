@@ -1,8 +1,9 @@
 import JSZip from "jszip";
 import { detectAdapter } from "../../adapters/registry";
 import type { ImportCandidate } from "../../adapters/adapter";
-import { ConversationArchiveSchema, type ConversationArchive, type ImportWarning, type MessageContentBlock, type UniversalConversation } from "../../domain/conversation";
+import { ConversationArchiveSchema, type ArchiveSection, type ConversationArchive, type ImportWarning, type MessageContentBlock, type UniversalConversation } from "../../domain/conversation";
 import { IMPORT_LIMITS } from "./import-limits";
+import { extractArchiveSections, mergeArchiveSections } from "./archive-sections";
 
 export type ImportSourceType = "zip" | "folder" | "files";
 
@@ -110,6 +111,14 @@ function combineAccountProfile(current: ImportedAccountProfile | undefined, inco
   return { displayName: current.displayName || incoming.displayName, email: current.email || incoming.email };
 }
 
+function accountProfileFromSections(sections: ArchiveSection[]): ImportedAccountProfile | undefined {
+  const profile = sections.find((section) => section.kind === "profile")?.items[0]?.fields;
+  if (!profile) return undefined;
+  const displayName = profile.Name || profile.Username;
+  const email = profile.Email;
+  return displayName || email ? { displayName, email } : undefined;
+}
+
 async function candidatesFromZip(file: File): Promise<{ candidates: ImportCandidate[]; errors: string[] }> {
   const zip = await JSZip.loadAsync(file);
   const entries = Object.values(zip.files).filter((entry) => !entry.dir);
@@ -156,6 +165,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
   const warnings: ImportWarning[] = [];
   const errors: string[] = [];
   const conversations: UniversalConversation[] = [];
+  let sections: ArchiveSection[] = [];
   const sourceFiles = entries.map(({ file, path }) => ({ name: path || file.name, size: file.size, mimeType: file.type || undefined, lastModified: file.lastModified }));
   const scopedEntries = entries.slice(0, IMPORT_LIMITS.maxFiles);
   const directAttachments = folderAttachments(scopedEntries);
@@ -189,22 +199,24 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
           : { candidates: [], errors: [] };
       errors.push(...candidates.errors);
       for (const candidate of candidates.candidates) {
+        const extractedSections = extractArchiveSections(candidate);
+        sections = mergeArchiveSections(sections, extractedSections);
         const profile = accountProfileFromCandidate(candidate);
-        account = combineAccountProfile(account, profile);
+        account = combineAccountProfile(account, combineAccountProfile(profile, accountProfileFromSections(extractedSections)));
         if (isAccountOnlyCandidate(candidate, profile)) continue;
         const result = parseCandidate(candidate);
         const readable = result.conversations.filter(hasReadableConversationContent);
         skippedEmptyConversations += result.conversations.length - readable.length;
         conversations.push(...readable);
         warnings.push(...result.warnings);
-        if (result.error) errors.push(result.error);
+        if (result.error && !extractedSections.length) errors.push(result.error);
       }
     } catch (error) {
       errors.push(`${sourcePath}: ${error instanceof Error ? error.message : "Could not read file."}`);
     }
   }
   if (skippedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATION_SKIPPED", message: String(skippedEmptyConversations) });
-  const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations });
+  const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations, sections });
   return { archive, warnings, errors, sourceType, account };
 }
 

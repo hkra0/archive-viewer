@@ -23,4 +23,11 @@ describe("hasReadableConversationContent", () => {
     const report = await importFiles([oversizedZipLikeFile]);
     expect(report.errors[0]).not.toContain("25 MB safety limit");
   });
+
+  it("uses nested Grok profile data as the imported account without exposing credentials", async () => {
+    const file = new File([JSON.stringify({ user: { givenName: "Grace", email: "grace@example.com", userId: "g1" }, api_keys: [{ key: "secret" }] })], "prod-mc-auth-mgmt-api.json", { type: "application/json" });
+    const report = await importFiles([file]);
+    expect(report.account).toEqual({ displayName: "Grace", email: "grace@example.com" });
+    expect(JSON.stringify(report.archive.sections)).not.toContain("secret");
+  });
 });

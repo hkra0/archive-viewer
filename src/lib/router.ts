@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 export type AppRoute =
   | { kind: "home" }
   | { kind: "group"; groupId: string }
+  | { kind: "section"; groupId: string; sectionId: string }
   | { kind: "conversation"; groupId: string; conversationId: string };
 
 function part(value: string | undefined): string | undefined {
@@ -13,6 +14,9 @@ function part(value: string | undefined): string | undefined {
 export function parseRoute(pathname = window.location.pathname): AppRoute {
   const segments = pathname.split("/").filter(Boolean).map(part);
   if (segments.length === 2 && segments[0] === "groups" && segments[1]) return { kind: "group", groupId: segments[1] };
+  if (segments.length === 4 && segments[0] === "groups" && segments[1] && segments[2] === "sections" && segments[3]) {
+    return { kind: "section", groupId: segments[1], sectionId: segments[3] };
+  }
   if (segments.length === 4 && segments[0] === "groups" && segments[1] && segments[2] === "conversations" && segments[3]) {
     return { kind: "conversation", groupId: segments[1], conversationId: segments[3] };
   }
@@ -22,7 +26,9 @@ export function parseRoute(pathname = window.location.pathname): AppRoute {
 export function routePath(route: AppRoute): string {
   if (route.kind === "home") return "/";
   const group = encodeURIComponent(route.groupId);
-  return route.kind === "group" ? `/groups/${group}` : `/groups/${group}/conversations/${encodeURIComponent(route.conversationId)}`;
+  if (route.kind === "group") return `/groups/${group}`;
+  if (route.kind === "section") return `/groups/${group}/sections/${encodeURIComponent(route.sectionId)}`;
+  return `/groups/${group}/conversations/${encodeURIComponent(route.conversationId)}`;
 }
 
 export function useAppRouter(): { route: AppRoute; navigate(route: AppRoute, replace?: boolean): void } {

@@ -3,10 +3,11 @@ import type { ConversationGroup, GroupData, ImportBatch } from "./group-types";
 import { THEME_STORAGE_KEY } from "../../lib/theme";
 
 const DATABASE_NAME = "archive-viewer";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const GROUPS = "groups";
 const CONVERSATIONS = "conversations";
 const BATCHES = "batches";
+const ARCHIVE_SECTIONS = "archive-sections";
 
 interface StoredConversation {
   key: string;
@@ -28,6 +29,7 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(BATCHES, { keyPath: "id" });
         store.createIndex("groupId", "groupId", { unique: false });
       }
+      if (!database.objectStoreNames.contains(ARCHIVE_SECTIONS)) database.createObjectStore(ARCHIVE_SECTIONS, { keyPath: "groupId" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("无法打开本地数据库。"));
@@ -88,15 +90,16 @@ export async function listGroups(): Promise<ConversationGroup[]> {
 export async function loadGroup(groupId: string): Promise<GroupData | undefined> {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction([GROUPS, CONVERSATIONS], "readonly");
+    const transaction = database.transaction([GROUPS, CONVERSATIONS, ARCHIVE_SECTIONS], "readonly");
     const group = await requestValue(transaction.objectStore(GROUPS).get(groupId)) as ConversationGroup | undefined;
     if (!group) {
       await transactionDone(transaction);
       return undefined;
     }
     const records = await requestValue(transaction.objectStore(CONVERSATIONS).index("groupId").getAll(IDBKeyRange.only(groupId))) as StoredConversation[];
+    const sectionRecord = await requestValue(transaction.objectStore(ARCHIVE_SECTIONS).get(groupId)) as { groupId: string; sections: GroupData["sections"] } | undefined;
     await transactionDone(transaction);
-    return { group, conversations: records.map((record) => hydrateConversation(record.conversation)) };
+    return { group, conversations: records.map((record) => hydrateConversation(record.conversation)), sections: sectionRecord?.sections || [] };
   } finally {
     database.close();
   }
@@ -105,7 +108,7 @@ export async function loadGroup(groupId: string): Promise<GroupData | undefined>
 export async function saveGroup(data: GroupData, batch?: ImportBatch): Promise<void> {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction([GROUPS, CONVERSATIONS, BATCHES], "readwrite");
+    const transaction = database.transaction([GROUPS, CONVERSATIONS, BATCHES, ARCHIVE_SECTIONS], "readwrite");
     const groups = transaction.objectStore(GROUPS);
     const conversations = transaction.objectStore(CONVERSATIONS);
     groups.put(data.group);
@@ -117,6 +120,7 @@ export async function saveGroup(data: GroupData, batch?: ImportBatch): Promise<v
       groupId: data.group.id,
       conversation: persistedConversation(conversation),
     } satisfies StoredConversation));
+    transaction.objectStore(ARCHIVE_SECTIONS).put({ groupId: data.group.id, sections: data.sections || [] });
     if (batch) transaction.objectStore(BATCHES).put(batch);
     await transactionDone(transaction);
   } finally {
@@ -127,8 +131,9 @@ export async function saveGroup(data: GroupData, batch?: ImportBatch): Promise<v
 export async function deleteGroup(groupId: string): Promise<void> {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction([GROUPS, CONVERSATIONS, BATCHES], "readwrite");
+    const transaction = database.transaction([GROUPS, CONVERSATIONS, BATCHES, ARCHIVE_SECTIONS], "readwrite");
     transaction.objectStore(GROUPS).delete(groupId);
+    transaction.objectStore(ARCHIVE_SECTIONS).delete(groupId);
     for (const storeName of [CONVERSATIONS, BATCHES] as const) {
       const store = transaction.objectStore(storeName);
       const keys = await requestValue(store.index("groupId").getAllKeys(IDBKeyRange.only(groupId)));

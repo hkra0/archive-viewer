@@ -29,4 +29,11 @@ describe("suggestedGroupName", () => {
   it("persists the localised fallback name when creating a group", () => {
     expect(mergeImportIntoGroup(undefined, report("folder"), undefined, "en").group.name).toBe("ChatGPT import");
   });
+
+  it("prefers available account identity over the default single-file name", () => {
+    const withName = { ...report("files", 1), account: { displayName: "Grace", email: "grace@example.com" } };
+    expect(suggestedGroupName(withName, "en")).toBe("Grace");
+    const withEmail = { ...report("files", 1), account: { email: "grace@example.com" } };
+    expect(suggestedGroupName(withEmail, "en")).toBe("grace@example.com");
+  });
 });

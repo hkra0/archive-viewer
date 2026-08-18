@@ -1,0 +1,152 @@
+import type { ArchiveRecord, ArchiveSection } from "../../domain/conversation";
+import type { ImportCandidate } from "../../adapters/adapter";
+import { createId } from "../../lib/ids";
+import { toIsoDate } from "../../lib/dates";
+
+type JsonRecord = Record<string, unknown>;
+
+function record(value: unknown): JsonRecord | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : undefined;
+}
+
+function text(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
+}
+
+function first(value: JsonRecord, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const found = text(value[key]);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function providerFromName(name: string): string | undefined {
+  if (/claude/i.test(name)) return "claude";
+  if (/grok|prod-mc/i.test(name)) return "grok";
+  if (/gemini/i.test(name)) return "gemini";
+  if (/deepseek/i.test(name)) return "deepseek";
+  if (/chatgpt|openai/i.test(name)) return "chatgpt";
+  return undefined;
+}
+
+const PROFILE_FIELDS: Array<[string, string[]]> = [
+  ["Name", ["full_name", "display_name", "displayName", "givenName", "name", "username"]],
+  ["Email", ["email", "email_address", "emailAddress"]],
+  ["Phone", ["verified_phone_number", "phone", "phone_number"]],
+  ["Username", ["xUsername"]],
+  ["User ID", ["user_id", "userId", "uuid", "account_uuid", "id"]],
+  ["Locale", ["locale", "language"]],
+  ["Plan", ["plan", "subscription", "account_type", "sessionTierId", "xSubscriptionType"]],
+];
+
+function profileItem(value: JsonRecord): ArchiveRecord | undefined {
+  const candidates = [value, record(value.user), record(value.account), record(value.profile), record(value.data)].filter((item): item is JsonRecord => Boolean(item));
+  const fields: Record<string, string> = {};
+  for (const candidate of candidates) {
+    for (const [label, keys] of PROFILE_FIELDS) fields[label] ||= first(candidate, keys) || "";
+  }
+  Object.keys(fields).forEach((key) => { if (!fields[key]) delete fields[key]; });
+  if (!Object.keys(fields).length) return undefined;
+  return { id: createId("profile"), title: fields.Name || fields.Email, fields };
+}
+
+function itemFromRecord(value: JsonRecord, kind: ArchiveSection["kind"]): ArchiveRecord {
+  const title = first(value, ["name", "title", "task_name", "label"]);
+  const bodyKeys = kind === "projects" ? ["description", "instructions", "prompt"]
+    : kind === "tasks" ? ["description", "prompt", "instructions", "task"]
+      : ["content", "text", "memory", "instructions", "description"];
+  const body = first(value, bodyKeys);
+  const fields: Record<string, string> = {};
+  for (const [label, keys] of [
+    ["Status", ["status", "state"]], ["Schedule", ["schedule", "recurrence", "rrule"]],
+    [kind === "tasks" ? "Task ID" : "Project ID", [kind === "tasks" ? "task_id" : "project_id", "project_uuid", "uuid", "id"]], ["Model", ["model", "model_name"]],
+  ] as Array<[string, string[]]>) {
+    const found = first(value, keys); if (found) fields[label] = found;
+  }
+  return {
+    id: first(value, ["id", "uuid", "project_id", "task_id"]) || createId(kind), title, body,
+    fields: Object.keys(fields).length ? fields : undefined,
+    createdAt: toIsoDate(value.created_at ?? value.create_time ?? value.createdAt),
+    updatedAt: toIsoDate(value.updated_at ?? value.modify_time ?? value.updatedAt),
+  };
+}
+
+function jsonSections(candidate: ImportCandidate, parsed: unknown): ArchiveSection[] {
+  const name = candidate.name;
+  const providerId = providerFromName(name);
+  const lower = name.toLowerCase();
+  const result: ArchiveSection[] = [];
+  const values = Array.isArray(parsed) ? parsed : [parsed];
+
+  if (/(?:^|\/)(?:users?|account|profile|user[_-]?info)\.json$/i.test(name) || /auth-mgmt-api\.json$/i.test(name)) {
+    const items = values.map(record).filter((item): item is JsonRecord => Boolean(item)).map(profileItem).filter((item): item is ArchiveRecord => Boolean(item));
+    if (items.length) result.push({ id: `${providerId || "archive"}-profile`, kind: "profile", providerId, items });
+  }
+
+  if (/(?:^|\/)(?:(?:gemini[_-])?(?:memories|memory|saved[_-]?info)(?:[_-]data)?)\.json$/i.test(name)) {
+    const items = values.flatMap((value) => {
+      const direct = text(value);
+      if (direct) return [{ id: createId("memory"), body: direct }];
+      const item = record(value);
+      if (!item) return [];
+      const body = first(item, ["conversations_memory", "saved_info", "savedInfo", "memory", "content", "text"]);
+      return body ? [{ id: first(item, ["id", "uuid", "account_uuid"]) || createId("memory"), body }] : [];
+    });
+    if (items.length) result.push({ id: `${providerId || "archive"}-memories`, kind: "memories", providerId, items });
+  }
+
+  const root = record(parsed);
+  const addCollection = (key: string, kind: ArchiveSection["kind"]) => {
+    const collection = root && Array.isArray(root[key]) ? root[key] as unknown[] : lower.endsWith(`/${key}.json`) || lower === `${key}.json` ? values : [];
+    const items = collection.map(record).filter((item): item is JsonRecord => Boolean(item)).map((item) => itemFromRecord(item, kind));
+    if (items.length) result.push({ id: `${providerId || "archive"}-${kind}`, kind, providerId, items });
+  };
+  addCollection("projects", "projects");
+  addCollection("tasks", "tasks");
+  addCollection("scheduled_tasks", "tasks");
+  addCollection("gems", "assistants");
+
+  if (/(?:^|\/)(?:(?:gemini[_-])?(?:custom[_-]?)?instructions(?:[_-]data)?)\.json$/i.test(name)) {
+    const items = values.flatMap((value) => {
+      const direct = text(value);
+      if (direct) return [{ id: createId("instructions"), body: direct }];
+      const item = record(value);
+      return item ? [itemFromRecord(item, "instructions")] : [];
+    }).filter((item) => item.title || item.body || item.fields);
+    if (items.length) result.push({ id: `${providerId || "archive"}-instructions`, kind: "instructions", providerId, items });
+  }
+  return result;
+}
+
+function htmlSection(candidate: ImportCandidate): ArchiveSection[] {
+  const match = candidate.name.match(/gemini_(gems|scheduled_actions|saved_info|memories|memory|instructions)_data\.html$/i);
+  if (!match) return [];
+  const plain = candidate.text.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
+  if (!plain || /^no activity\.?$/i.test(plain)) return [];
+  const pageKind = match[1]!.toLowerCase();
+  const kind = pageKind === "gems" ? "assistants" : pageKind === "scheduled_actions" ? "tasks" : pageKind === "instructions" ? "instructions" : "memories";
+  return [{ id: `gemini-${kind}`, kind, providerId: "gemini", items: [{ id: createId(kind), body: plain }] }];
+}
+
+export function extractArchiveSections(candidate: ImportCandidate): ArchiveSection[] {
+  if (/\.html?$/i.test(candidate.name)) return htmlSection(candidate);
+  if (!/\.json$/i.test(candidate.name)) return [];
+  try { return jsonSections(candidate, JSON.parse(candidate.text)); } catch { return []; }
+}
+
+export function mergeArchiveSections(existing: ArchiveSection[] = [], incoming: ArchiveSection[] = []): ArchiveSection[] {
+  const merged = new Map(existing.map((section) => [section.id, { ...section, items: [...section.items] }]));
+  for (const section of incoming) {
+    const current = merged.get(section.id);
+    if (!current) { merged.set(section.id, { ...section, items: [...section.items] }); continue; }
+    const seen = new Set(current.items.map((item) => `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`));
+    for (const item of section.items) {
+      const key = `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`;
+      if (!seen.has(key)) { current.items.push(item); seen.add(key); }
+    }
+  }
+  return [...merged.values()].filter((section) => section.items.length);
+}
