@@ -4,22 +4,25 @@ import { droppedEntries, ImportDropzone, type ImportSelection } from "./componen
 import { ConversationList } from "./components/ConversationList";
 import { ConversationReader } from "./components/ConversationReader";
 import { archiveSectionLabel, ArchiveSectionNavigation, ArchiveSectionReader } from "./components/ArchiveSections";
+import { ArchiveHealth } from "./components/ArchiveHealth";
 import { GroupSwitcher } from "./components/GroupSwitcher";
 import { Icon } from "./components/Icons";
 import { TinykoMark } from "./components/TinykoMark";
 import { importEntries, type ImportReport } from "./features/import/import-pipeline";
 import { mergeImportIntoGroup, suggestedGroupName } from "./features/groups/group-import";
 import { clearAllStoredData, deleteGroup, listGroups, loadGroup, revokeConversationUrls, saveGroup } from "./features/groups/group-store";
-import type { ConversationGroup, GroupData } from "./features/groups/group-types";
+import type { ConversationGroup, ExportPreferences, GroupData } from "./features/groups/group-types";
 import { createId } from "./lib/ids";
 import { useI18n } from "./lib/i18n";
-import { useAppRouter } from "./lib/router";
+import { useAppRouter, type AppRoute } from "./lib/router";
 import { searchConversations } from "./features/search/search";
 import { readThemePreference, resolvedTheme, THEME_STORAGE_KEY, type ThemePreference } from "./lib/theme";
+import { selectedConversationIds, withConversationSelected } from "./features/selection/conversation-selection";
 
 type DialogKind = "create" | "rename";
 type GroupFormValues = { name: string; note?: string };
 type PendingImport = { report: ImportReport; defaultGroupName: string };
+type Toast = { message: string; durationMs?: number };
 const SIDEBAR_COLLAPSED_KEY = "archive-viewer.sidebar-collapsed";
 const FEEDBACK_DURATION_MS = 6000;
 const FEEDBACK_FADE_DURATION_MS = 2000;
@@ -117,9 +120,10 @@ export default function App() {
   const [dialog, setDialog] = useState<DialogKind>();
   const [editingGroupId, setEditingGroupId] = useState<string>();
   const [pendingImport, setPendingImport] = useState<PendingImport>();
-  const [toast, setToast] = useState<string>();
+  const [toast, setToast] = useState<Toast>();
   const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [showHome, setShowHome] = useState(route.kind === "home");
+  const [showStatistics, setShowStatistics] = useState(false);
   const [globalDragging, setGlobalDragging] = useState(false);
   const dragDepth = useRef(0);
 
@@ -144,11 +148,13 @@ export default function App() {
         if (!target) return;
         const data = await loadGroup(target.id); if (cancelled) { if (data) revokeConversationUrls(data.conversations); return; }
         if (!data) return;
-        const requestedConversation = route.kind === "conversation" ? route.conversationId : route.kind === "section" ? undefined : localStorage.getItem("archive-viewer.active-conversation");
+        const requestedConversation = route.kind === "conversation" ? route.conversationId : route.kind === "section" || route.kind === "profile" || route.kind === "memories" || route.kind === "statistics" ? undefined : localStorage.getItem("archive-viewer.active-conversation");
         const next = requestedConversation && data.conversations.some((conversation) => conversation.id === requestedConversation) ? requestedConversation : chronological(data.conversations)[0]?.id;
-        const nextSection = route.kind === "section" && data.sections.some((section) => section.id === route.sectionId) ? route.sectionId : next ? undefined : data.sections[0]?.id;
-        setActive(data); setSelectedId(next); setSelectedSectionId(nextSection); saveSelectedConversation(next); localStorage.setItem("archive-viewer.active-group", data.group.id); setShowHome(route.kind === "home" || (!next && !data.sections.length));
+        const requestedSection = route.kind === "section" ? route.sectionId : route.kind === "profile" || route.kind === "memories" ? data.sections.find((section) => section.kind === route.kind)?.id : undefined;
+        const nextSection = requestedSection && data.sections.some((section) => section.id === requestedSection) ? requestedSection : next ? undefined : data.sections[0]?.id;
+        setActive(data); setSelectedId(next); setSelectedSectionId(nextSection); saveSelectedConversation(next); localStorage.setItem("archive-viewer.active-group", data.group.id); setShowHome(route.kind === "home" || (!next && !data.sections.length)); setShowStatistics(route.kind === "statistics");
         if (route.kind === "conversation" && requestedConversation !== next) { setErrors([t("invalidLink")]); navigate({ kind: "group", groupId: data.group.id }, true); }
+        if ((route.kind === "section" || route.kind === "profile" || route.kind === "memories") && !requestedSection) { setErrors([t("invalidLink")]); navigate({ kind: "group", groupId: data.group.id }, true); }
       } catch (error) { if (!cancelled) setErrors([error instanceof Error ? error.message : "Unable to read local data."]); }
       finally { if (!cancelled) setLoading(false); }
     }
@@ -160,6 +166,7 @@ export default function App() {
   const sorted = useMemo(() => chronological(active?.conversations || []), [active]);
   const matches = useMemo(() => searchConversations(sorted, query), [sorted, query]);
   const visible = sorted.filter((conversation) => matches.has(conversation.id));
+  const markedIds = useMemo(() => selectedConversationIds(active?.conversations || []), [active?.conversations]);
   const selected = active?.conversations.find((conversation) => conversation.id === selectedId) || visible[0] || sorted[0];
   const selectedSection = active?.sections.find((section) => section.id === selectedSectionId);
 
@@ -168,29 +175,32 @@ export default function App() {
     setGroups((current) => [data.group, ...current.filter((group) => group.id !== data.group.id)].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
     localStorage.setItem("archive-viewer.active-group", data.group.id);
     const nextSelected = selectedConversationId || chronological(data.conversations)[0]?.id;
-    setSelectedId(nextSelected); setSelectedSectionId(nextSelected ? undefined : data.sections[0]?.id); saveSelectedConversation(nextSelected); setQuery("");
+    setSelectedId(nextSelected); setSelectedSectionId(nextSelected ? undefined : data.sections[0]?.id); setShowStatistics(false); saveSelectedConversation(nextSelected); setQuery("");
     return nextSelected;
   }
 
-  async function activateGroup(groupId: string, requestedConversationId?: string, requestedSectionId?: string): Promise<boolean> {
+  async function activateGroup(nextRoute: Exclude<AppRoute, { kind: "home" }>): Promise<boolean> {
     try {
-      const data = groupId === active?.group.id ? active : await loadGroup(groupId);
+      const data = nextRoute.groupId === active?.group.id ? active : await loadGroup(nextRoute.groupId);
       if (!data) return false;
+      const requestedConversationId = nextRoute.kind === "conversation" ? nextRoute.conversationId : undefined;
+      const requestedSectionId = nextRoute.kind === "section" ? nextRoute.sectionId : nextRoute.kind === "profile" || nextRoute.kind === "memories" ? data.sections.find((section) => section.kind === nextRoute.kind)?.id : undefined;
+      if ((nextRoute.kind === "section" || nextRoute.kind === "profile" || nextRoute.kind === "memories") && !requestedSectionId) return false;
       const next = requestedConversationId && data.conversations.some((conversation) => conversation.id === requestedConversationId) ? requestedConversationId : chronological(data.conversations)[0]?.id;
-      replaceActive(data, next); if (requestedSectionId && data.sections.some((section) => section.id === requestedSectionId)) setSelectedSectionId(requestedSectionId); setSidebarOpen(false); setShowHome(!next && !data.sections.length); return true;
+      replaceActive(data, next); if (requestedSectionId) setSelectedSectionId(requestedSectionId); setShowStatistics(nextRoute.kind === "statistics"); setSidebarOpen(false); setShowHome(false); return true;
     } catch (error) { setErrors([error instanceof Error ? error.message : "Unable to switch group."]); return false; }
   }
 
   useEffect(() => {
     if (loading) return;
     if (route.kind === "home") { setShowHome(true); return; }
-    void (async () => { const exists = await activateGroup(route.groupId, route.kind === "conversation" ? route.conversationId : undefined, route.kind === "section" ? route.sectionId : undefined); if (!exists) { setErrors([t("invalidLink")]); navigate({ kind: "home" }, true); } })();
+    void (async () => { const exists = await activateGroup(route); if (!exists) { setErrors([t("invalidLink")]); navigate({ kind: "home" }, true); } })();
   // Route changes are the input; active is resolved by activateGroup.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, loading]);
 
-  async function selectGroup(groupId: string): Promise<void> { const exists = await activateGroup(groupId); if (exists) navigate({ kind: "group", groupId }); }
-  function showImportHome(): void { navigate({ kind: "home" }); setShowHome(true); setSidebarOpen(false); }
+  async function selectGroup(groupId: string): Promise<void> { const nextRoute: AppRoute = { kind: "group", groupId }; const exists = await activateGroup(nextRoute); if (exists) navigate(nextRoute); }
+  function showImportHome(): void { navigate({ kind: "home" }); setShowHome(true); setShowStatistics(false); setSidebarOpen(false); }
 
   async function commitImport(report: ImportReport, targetGroupId?: string, newGroupName?: string): Promise<void> {
     setImporting(true); let temporaryConversations = report.archive.conversations;
@@ -213,7 +223,7 @@ export default function App() {
     setImporting(true);
     try {
       const report = await importEntries(selection.entries, selection.sourceType);
-      const formattedWarnings = report.warnings.map((warning) => warning.code === "EMPTY_CONVERSATION_SKIPPED" ? { ...warning, message: t("importSkippedEmpty", { count: warning.message }) } : warning);
+      const formattedWarnings = report.warnings.map((warning) => warning.code === "EMPTY_CONVERSATIONS_PRESERVED" ? { ...warning, message: locale === "zh-CN" ? `为保证完整性，已保留 ${warning.message} 个空对话。` : `Preserved ${warning.message} empty conversations for completeness.` } : warning);
       setWarnings(formattedWarnings); setErrors(report.errors);
       if (!report.archive.conversations.length && !report.archive.sections?.length) return;
       const needsDestinationChoice = groups.length > 0;
@@ -269,9 +279,22 @@ export default function App() {
     try { setToast(undefined); await clearAllStoredData(); if (active) revokeConversationUrls(active.conversations); setActive(undefined); setGroups([]); setSelectedId(undefined); setSelectedSectionId(undefined); setWarnings([]); setErrors([]); setQuery(""); setTheme("system"); setShowHome(false); setDialog(undefined); navigate({ kind: "home" }); }
     catch (error) { setErrors([error instanceof Error ? error.message : "Unable to clear local data."]); }
   }
-  function showToast(message: string): void { setToast(message); }
-  function selectConversation(id: string): void { setSelectedId(id); setSelectedSectionId(undefined); saveSelectedConversation(id); setSidebarOpen(false); setShowHome(false); if (active) navigate({ kind: "conversation", groupId: active.group.id, conversationId: id }); }
-  function selectArchiveSection(id: string): void { setSelectedSectionId(id); setSidebarOpen(false); setShowHome(false); if (active) navigate({ kind: "section", groupId: active.group.id, sectionId: id }); }
+  function showToast(message: string, durationMs?: number): void { setToast({ message, durationMs }); }
+  function selectConversation(id: string): void { setSelectedId(id); setSelectedSectionId(undefined); setShowStatistics(false); saveSelectedConversation(id); setSidebarOpen(false); setShowHome(false); if (active) navigate({ kind: "conversation", groupId: active.group.id, conversationId: id }); }
+  function selectArchiveSection(id: string): void { setSelectedSectionId(id); setShowStatistics(false); setSidebarOpen(false); setShowHome(false); if (active) { const section = active.sections.find((item) => item.id === id); navigate(section?.kind === "profile" || section?.kind === "memories" ? { kind: section.kind, groupId: active.group.id } : { kind: "section", groupId: active.group.id, sectionId: id }); } }
+  function showStatisticsPage(): void { setSelectedSectionId(undefined); setShowStatistics(true); setShowHome(false); setSidebarOpen(false); if (active) navigate({ kind: "statistics", groupId: active.group.id }); }
+  function toggleSelection(id: string): void {
+    if (!active) return;
+    const data = { ...active, conversations: active.conversations.map((conversation) => conversation.id === id ? withConversationSelected(conversation, !markedIds.includes(id)) : conversation) };
+    setActive(data);
+    void saveGroup(data).catch((error: unknown) => setErrors((current) => [...current, error instanceof Error ? error.message : "Unable to save selection."]));
+  }
+  function updateExportPreferences(preferences: ExportPreferences): void {
+    if (!active) return;
+    const data = { ...active, group: { ...active.group, exportPreferences: preferences } };
+    setActive(data); setGroups((current) => current.map((group) => group.id === data.group.id ? data.group : group));
+    void saveGroup(data).catch((error: unknown) => setErrors((current) => [...current, error instanceof Error ? error.message : "Unable to save export preferences."]));
+  }
   function dismissFeedback(kind: "error" | "warning", index: number): void { if (kind === "error") setErrors((current) => current.filter((_, currentIndex) => currentIndex !== index)); else setWarnings((current) => current.filter((_, currentIndex) => currentIndex !== index)); }
   function confirmDialog(values: GroupFormValues): void { if (dialog === "create") void createGroup(values); if (dialog === "rename") void renameGroup(values); }
 
@@ -285,18 +308,19 @@ export default function App() {
           <div className="sidebar-brand"><a className="brand" href="/" aria-label={t("home")} onClick={(event) => { event.preventDefault(); showImportHome(); }}><TinykoMark /></a><button type="button" className="sidebar-collapse" aria-label={sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar")} onClick={() => setSidebarCollapsed((value) => !value)}><Icon name="panel" /></button><button type="button" className="mobile-close" aria-label={t("closeList")} onClick={() => setSidebarOpen(false)}>×</button></div>
           <div className="collapsed-sidebar-actions"><button type="button" aria-label={t("openSearch")} onClick={() => { setSidebarCollapsed(false); window.setTimeout(() => document.querySelector<HTMLInputElement>(".search input")?.focus(), 0); }}><Icon name="search" /></button><button type="button" className="collapsed-import-button" aria-label={t("import")} onClick={showImportHome}><Icon name="import" /></button></div>
           <ImportDropzone compact disabled={importing} onImport={(selection) => void handleImport(selection)} onOpenImportHome={showImportHome} />
+          <button type="button" className={`statistics-nav-button${showStatistics ? " selected" : ""}`} onClick={showStatisticsPage}><Icon name="chart" /><span>{t("statistics")}</span></button>
           <ArchiveSectionNavigation sections={active.sections} selectedId={selectedSectionId} onSelect={selectArchiveSection} />
           {sorted.length > 0 && <><label className="search"><span>{t("search")}</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("searchPlaceholder")} /></label>
-          <p className="count">{t("conversationCount", { visible: visible.length, total: sorted.length })}</p><ConversationList conversations={visible} selectedId={selectedSection ? undefined : selected?.id} onSelect={selectConversation} /></>}
+          <p className="count">{t("conversationCount", { visible: visible.length, total: sorted.length })} · {t("selectedCount", { count: markedIds.length })}</p><ConversationList conversations={visible} selectedId={showStatistics || selectedSection ? undefined : selected?.id} selectedConversationIds={markedIds} onSelect={selectConversation} onToggleSelection={toggleSelection} /></>}
         </div>
         <GroupSwitcher activeGroup={active.group} groups={groups} onSelect={(id) => void selectGroup(id)} onCreate={() => setDialog("create")} onRename={(id) => { setEditingGroupId(id); setDialog("rename"); }} onDelete={(id) => void removeGroup(id)} onClearAll={() => void clearAll()} onToast={showToast} theme={theme} onThemeChange={setTheme} />
       </aside>
-      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span title={showHome ? t("home") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}>{showHome ? t("home") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : selectedSection ? <ArchiveSectionReader section={selectedSection} /> : <ConversationReader conversation={selected} onGoHome={showImportHome} />}</div>
+      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span title={showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}>{showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : showStatistics ? <ArchiveHealth data={active} /> : selectedSection ? <ArchiveSectionReader section={selectedSection} /> : <ConversationReader conversation={selected} allConversations={active.conversations} archiveSections={active.sections} selectedConversationIds={markedIds} exportPreferences={active.group.exportPreferences} onExportPreferencesChange={updateExportPreferences} onGoHome={showImportHome} />}</div>
       {(errors.length > 0 || warnings.length > 0) && <FeedbackQueue floating errors={errors} warnings={warnings} onDismiss={dismissFeedback} />}
     </div>}
     {dialog && <ManagementDialog key={`${dialog}-${editingGroupId || "new"}`} kind={dialog} initialName={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.name || "" : ""} initialNote={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.note || groups.find((group) => group.id === editingGroupId)?.account?.email || "" : ""} onCancel={() => { setEditingGroupId(undefined); setDialog(undefined); }} onConfirm={confirmDialog} />}
     {pendingImport && <ImportDestinationDialog pending={pendingImport} groups={groups} onCancel={() => setPendingImport(undefined)} onConfirm={(groupId, newGroupName) => { const report = pendingImport.report; setPendingImport(undefined); void commitImport(report, groupId, newGroupName); }} />}
-    {toast && <TransientNotice key={toast} onDismiss={() => setToast(undefined)}><div className="action-toast" role="status">{toast}</div></TransientNotice>}
+    {toast && <TransientNotice key={toast.message} durationMs={toast.durationMs} onDismiss={() => setToast(undefined)}><div className="action-toast" role="status">{toast.message}</div></TransientNotice>}
   </div>;
 }
 

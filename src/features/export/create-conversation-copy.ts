@@ -20,7 +20,7 @@ export function continuationPromptForLocale(locale: ContinuationPromptLocale): s
   return CONTINUATION_PROMPTS[locale];
 }
 
-export interface ConversationCopyOptions {
+export interface ConversationExportOptions {
   includeTitle: boolean;
   includeRoles: boolean;
   includeTimestamps: boolean;
@@ -30,7 +30,7 @@ export interface ConversationCopyOptions {
   continuationPrompt: string;
 }
 
-export const DEFAULT_COPY_OPTIONS: ConversationCopyOptions = {
+export const DEFAULT_EXPORT_OPTIONS: ConversationExportOptions = {
   includeTitle: true,
   includeRoles: true,
   includeTimestamps: false,
@@ -46,12 +46,14 @@ function blockText(block: UniversalMessage["content"][number]): string {
   if (block.type === "code") return `\`\`\`${block.language || ""}\n${block.code}\n\`\`\``;
   if (block.type === "image") return `[Image: ${block.alt || block.attachmentId}]`;
   if (block.type === "file") return `[File: ${block.attachmentId}]`;
+  if (block.type === "thinking") return `<details>\n<summary>Thinking${block.summaries?.length ? ` — ${block.summaries.join("; ")}` : ""}</summary>\n\n${block.thinking}\n\n</details>`;
   if (block.type === "tool-call") return `[Tool call: ${block.name}]\n\`\`\`json\n${JSON.stringify(block.input, null, 2)}\n\`\`\``;
-  if (block.type === "tool-result") return `[Tool result${block.name ? `: ${block.name}` : ""}]\n\`\`\`json\n${JSON.stringify(block.output, null, 2)}\n\`\`\``;
+  if (block.type === "tool-result") return `[Tool result${block.name ? `: ${block.name}` : ""}${block.isError ? " (error)" : ""}]\n\`\`\`json\n${typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2)}\n\`\`\``;
+  if (block.type === "empty") return `[Empty message${block.reason ? `: ${block.reason}` : ""}]`;
   return `[Unrecognised exported content]\n\`\`\`json\n${JSON.stringify(block.raw, null, 2)}\n\`\`\``;
 }
 
-function messageText(message: UniversalMessage, options: ConversationCopyOptions): string {
+function messageText(message: UniversalMessage, options: ConversationExportOptions): string {
   const metadata: string[] = [];
   if (options.includeRoles) metadata.push(message.authorName || message.role);
   if (options.includeTimestamps && message.createdAt) metadata.push(message.createdAt);
@@ -60,7 +62,7 @@ function messageText(message: UniversalMessage, options: ConversationCopyOptions
   return metadata.length ? `### ${metadata.join(" · ")}\n\n${body}` : body;
 }
 
-export function createConversationCopy(conversation: UniversalConversation, messages: UniversalMessage[], options: ConversationCopyOptions): string {
+export function createConversationExport(conversation: UniversalConversation, messages: UniversalMessage[], options: ConversationExportOptions): string {
   const sections: string[] = [];
   if (options.includeContinuationPrompt && options.continuationPrompt.trim()) {
     sections.push(`## Continuation prompt\n\n${options.continuationPrompt.trim()}`);

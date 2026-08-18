@@ -1,12 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { UniversalConversation, UniversalMessage } from "../domain/conversation";
+import type { ArchiveSection, UniversalConversation, UniversalMessage } from "../domain/conversation";
 import { formatDate } from "../lib/dates";
-import { continuationPromptForLocale, createConversationCopy, DEFAULT_COPY_OPTIONS, type ConversationCopyOptions } from "../features/export/create-conversation-copy";
+import { continuationPromptForLocale, DEFAULT_EXPORT_OPTIONS, type ConversationExportOptions } from "../features/export/create-conversation-copy";
+import { createExportText, DEFAULT_ARCHIVE_EXPORT_OPTIONS, downloadConversationMarkdown, downloadConversationsZip } from "../features/export/downloads";
 import { MarkdownContent } from "./MarkdownContent";
 import { useI18n } from "../lib/i18n";
+import type { ExportPreferences } from "../features/groups/group-types";
+import { Icon } from "./Icons";
+
+const DEFAULT_CONVERSATION_ARCHIVE_OPTIONS = { includeProfile: false, includeMemories: false };
+
+function exportOptionsForLocale(options: Partial<ConversationExportOptions> | undefined, locale: "zh-CN" | "en"): ConversationExportOptions {
+  return {
+    ...DEFAULT_EXPORT_OPTIONS,
+    ...options,
+    continuationPrompt: options?.continuationPrompt || continuationPromptForLocale(locale),
+  };
+}
+
+function hasEditedContinuationPrompt(options: Partial<ConversationExportOptions> | undefined, locale: "zh-CN" | "en"): boolean {
+  return Boolean(options?.continuationPrompt && options.continuationPrompt !== continuationPromptForLocale(locale));
+}
+
+function storedConversationExportOptions(preferences: ExportPreferences | undefined): Partial<ConversationExportOptions> | undefined {
+  return preferences?.conversationExportOptions ?? preferences?.conversationCopyOptions;
+}
 
 function MessageBody({ message, conversation }: { message: UniversalMessage; conversation: UniversalConversation }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   return <>{message.content.map((block, index) => {
     if (block.type === "markdown") return <MarkdownContent key={index} markdown={block.markdown} attachments={conversation.attachments} />;
     if (block.type === "text") return <p key={index}>{block.text}</p>;
@@ -15,8 +36,15 @@ function MessageBody({ message, conversation }: { message: UniversalMessage; con
       const attachment = conversation.attachments.find((item) => item.id === block.attachmentId);
       return attachment?.objectUrl ? <img key={index} className="message-image" src={attachment.objectUrl} alt={block.alt || attachment.name} /> : <p key={index}>{t("importedAttachment")}: {attachment?.name || t("unknownDate")}</p>;
     }
-    if (block.type === "file") return <p key={index}>Attached file: {conversation.attachments.find((item) => item.id === block.attachmentId)?.name || "missing"}</p>;
-    return null;
+    if (block.type === "file") {
+      const attachment = conversation.attachments.find((item) => item.id === block.attachmentId);
+      return <details className="structured-block attachment-block" key={index}><summary>📎 {attachment?.name || "Missing attachment"}{attachment?.size ? ` · ${Math.ceil(attachment.size / 1024)} KB` : ""}</summary>{attachment?.textContent && <pre><code>{attachment.textContent}</code></pre>}{attachment?.objectUrl && <a href={attachment.objectUrl} download={attachment.name}>{locale === "zh-CN" ? "下载附件" : "Download attachment"}</a>}</details>;
+    }
+    if (block.type === "thinking") return <details className="structured-block thinking-block" key={index}><summary>{locale === "zh-CN" ? "思考过程" : "Thinking"}{block.summaries?.length ? ` — ${block.summaries.join("；")}` : ""}</summary><pre>{block.thinking}</pre></details>;
+    if (block.type === "tool-call") return <details className="structured-block tool-block" key={index}><summary>🔧 {locale === "zh-CN" ? "工具调用" : "Tool call"}: {block.name}</summary><pre><code>{JSON.stringify(block.input, null, 2)}</code></pre></details>;
+    if (block.type === "tool-result") return <details className={`structured-block tool-block${block.isError ? " error" : ""}`} key={index}><summary>↩ {locale === "zh-CN" ? "工具结果" : "Tool result"}{block.name ? `: ${block.name}` : ""}{block.isError ? ` (${locale === "zh-CN" ? "错误" : "error"})` : ""}</summary><pre><code>{typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2)}</code></pre></details>;
+    if (block.type === "empty") return <p className="empty-message" key={index}>⚠ {block.reason || (locale === "zh-CN" ? "导出数据中的这条消息为空。" : "This message is empty in the exported data.")}</p>;
+    return <details className="structured-block unknown-block" key={index}><summary>⚠ {locale === "zh-CN" ? "暂不支持的内容块（已保留）" : "Unsupported content block (preserved)"}</summary><pre><code>{JSON.stringify(block.raw, null, 2)}</code></pre></details>;
   })}</>;
 }
 
@@ -28,6 +56,18 @@ interface ConversationTree {
 }
 
 const ROOT_SELECTION_KEY = "__conversation_root__";
+
+function searchableMessageText(message: UniversalMessage): string {
+  return message.content.map((block) => {
+    if (block.type === "markdown") return block.markdown;
+    if (block.type === "text") return block.text;
+    if (block.type === "code") return block.code;
+    if (block.type === "thinking") return `${block.summaries?.join(" ") || ""} ${block.thinking}`;
+    if (block.type === "tool-call") return `${block.name} ${JSON.stringify(block.input)}`;
+    if (block.type === "tool-result") return `${block.name || ""} ${typeof block.output === "string" ? block.output : JSON.stringify(block.output)}`;
+    return "";
+  }).join(" ");
+}
 
 function byDateThenInput(a: UniversalMessage, b: UniversalMessage): number {
   const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
@@ -92,18 +132,34 @@ function BranchNavigator({ siblings, selectedId, onSelect }: { siblings: Univers
   </nav>;
 }
 
-export function ConversationReader({ conversation, onGoHome }: { conversation?: UniversalConversation; onGoHome?(): void }) {
+export function ConversationReader({ conversation, allConversations = [], archiveSections = [], selectedConversationIds = [], exportPreferences, onExportPreferencesChange, onGoHome }: { conversation?: UniversalConversation; allConversations?: UniversalConversation[]; archiveSections?: ArchiveSection[]; selectedConversationIds?: string[]; exportPreferences?: ExportPreferences; onExportPreferencesChange?(preferences: ExportPreferences): void; onGoHome?(): void }) {
   const { locale, t } = useI18n();
   const tree = useMemo(() => buildConversationTree(conversation?.messages || []), [conversation]);
   const [selection, setSelection] = useState<Record<string, string>>({});
-  const [copyOptions, setCopyOptions] = useState<ConversationCopyOptions>(() => ({ ...DEFAULT_COPY_OPTIONS, continuationPrompt: continuationPromptForLocale(locale) }));
-  const [continuationPromptEdited, setContinuationPromptEdited] = useState(false);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [exportOptions, setExportOptions] = useState<ConversationExportOptions>(() => exportOptionsForLocale(storedConversationExportOptions(exportPreferences), locale));
+  const [continuationPromptEdited, setContinuationPromptEdited] = useState(() => hasEditedContinuationPrompt(storedConversationExportOptions(exportPreferences), locale));
+  const [conversationArchiveOptions, setConversationArchiveOptions] = useState(() => exportPreferences?.conversationArchiveOptions || DEFAULT_CONVERSATION_ARCHIVE_OPTIONS);
+  const [groupArchiveOptions, setGroupArchiveOptions] = useState(() => exportPreferences?.groupArchiveOptions || DEFAULT_ARCHIVE_EXPORT_OPTIONS);
+  const [exportTab, setExportTab] = useState<"conversation" | "group">("conversation");
+  const [groupExportScope, setGroupExportScope] = useState<"selected" | "unselected" | "all">(() => exportPreferences?.groupExportScope || "all");
+  const [exportStatus, setExportStatus] = useState<"idle" | "copied" | "error">("idle");
   const [exportOpen, setExportOpen] = useState(false);
+  const [messageQuery, setMessageQuery] = useState("");
+  const [searchIndex, setSearchIndex] = useState(0);
   const exportControl = useRef<HTMLDivElement>(null);
-  useEffect(() => { setSelection({}); setCopyStatus("idle"); setExportOpen(false); }, [conversation?.id]);
+  const messageElements = useRef(new Map<string, HTMLElement>());
+  const exportPreferencesRef = useRef<ExportPreferences | undefined>(exportPreferences);
+  useEffect(() => { setSelection({}); setExportStatus("idle"); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); messageElements.current.clear(); }, [conversation?.id]);
   useEffect(() => {
-    if (!continuationPromptEdited) setCopyOptions((current) => ({ ...current, continuationPrompt: continuationPromptForLocale(locale) }));
+    exportPreferencesRef.current = exportPreferences;
+    setExportOptions(exportOptionsForLocale(storedConversationExportOptions(exportPreferences), locale));
+    setContinuationPromptEdited(hasEditedContinuationPrompt(storedConversationExportOptions(exportPreferences), locale));
+    setConversationArchiveOptions(exportPreferences?.conversationArchiveOptions || DEFAULT_CONVERSATION_ARCHIVE_OPTIONS);
+    setGroupArchiveOptions(exportPreferences?.groupArchiveOptions || DEFAULT_ARCHIVE_EXPORT_OPTIONS);
+    setGroupExportScope(exportPreferences?.groupExportScope || "all");
+  }, [exportPreferences, locale]);
+  useEffect(() => {
+    if (!continuationPromptEdited) setExportOptions((current) => ({ ...current, continuationPrompt: continuationPromptForLocale(locale) }));
   }, [locale, continuationPromptEdited]);
   useEffect(() => {
     if (!exportOpen) return undefined;
@@ -115,18 +171,28 @@ export function ConversationReader({ conversation, onGoHome }: { conversation?: 
   }, [exportOpen]);
   if (!conversation) return <main className="reader empty-reader"><p>{t("noReadableMessages")}</p></main>;
   const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : conversation.messages;
+  const normalisedQuery = messageQuery.trim().toLocaleLowerCase(locale);
+  const searchHits = normalisedQuery ? messages.filter((message) => searchableMessageText(message).toLocaleLowerCase(locale).includes(normalisedQuery)) : [];
+  const currentHit = searchHits[Math.min(searchIndex, Math.max(0, searchHits.length - 1))];
+  const moveToHit = (delta: number) => {
+    if (!searchHits.length) return;
+    const next = (searchIndex + delta + searchHits.length) % searchHits.length;
+    setSearchIndex(next);
+    messageElements.current.get(searchHits[next]!.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const detachedCount = tree.detachedRootGroups.reduce((count, group) => count + group.messages.length, 0);
   const placeholderCount = conversation.messages.filter((message) => message.metadata?.missingFromExport === true).length;
   const selectBranch = (parentKey: string, id: string) => {
     setSelection((current) => ({ ...current, [parentKey]: id }));
-    setCopyStatus("idle");
+    setExportStatus("idle");
   };
   const renderPath = (path: UniversalMessage[], roots: UniversalMessage[], rootKey: string) => path.map((message, index) => {
     const isRoot = index === 0;
     const siblings = isRoot ? roots : tree.childrenByParent.get(message.parentMessageId || "") || [];
     const parentKey = isRoot ? rootKey : message.parentMessageId || rootKey;
     const isMissing = message.metadata?.missingFromExport === true;
-    return <div key={message.id} className={`message-stack ${message.role}${isMissing ? " missing" : ""}`}>
+    const isHit = searchHits.some((hit) => hit.id === message.id);
+    return <div key={message.id} ref={(element) => { if (element) messageElements.current.set(message.id, element); else messageElements.current.delete(message.id); }} className={`message-stack ${message.role}${isMissing ? " missing" : ""}${isHit ? " search-hit" : ""}${currentHit?.id === message.id ? " current-search-hit" : ""}`}>
       <strong className="message-role">{t(`role_${message.role}`)}</strong>
       <article className={`message ${message.role}${isMissing ? " missing" : ""}`}>
         <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>
@@ -135,37 +201,54 @@ export function ConversationReader({ conversation, onGoHome }: { conversation?: 
       <div className="message-branch-actions"><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt, locale, t("unknownDate"))}</time></div>
     </div>;
   });
-  const setCopyOption = (option: keyof ConversationCopyOptions, checked: boolean) => {
-    setCopyOptions((current) => ({ ...current, [option]: checked }));
-    setCopyStatus("idle");
+  const persistPreferences = (next: ExportPreferences) => { exportPreferencesRef.current = next; onExportPreferencesChange?.(next); };
+  const setExportOption = (option: Exclude<keyof ConversationExportOptions, "continuationPrompt">, checked: boolean) => {
+    setExportOptions((current) => { const next = { ...current, [option]: checked }; const { conversationCopyOptions: _legacy, ...preferences } = exportPreferencesRef.current || {}; persistPreferences({ ...preferences, conversationExportOptions: next }); return next; });
+    setExportStatus("idle");
   };
-  const copyCurrentBranch = async () => {
+  const setContinuationPrompt = (continuationPrompt: string) => {
+    setExportOptions((current) => { const next = { ...current, continuationPrompt }; const { conversationCopyOptions: _legacy, ...preferences } = exportPreferencesRef.current || {}; persistPreferences({ ...preferences, conversationExportOptions: next }); return next; });
+    setContinuationPromptEdited(continuationPrompt !== continuationPromptForLocale(locale));
+    setExportStatus("idle");
+  };
+  const setConversationArchiveOption = (option: "includeProfile" | "includeMemories", checked: boolean) => setConversationArchiveOptions((current) => { const next = { ...current, [option]: checked }; persistPreferences({ ...exportPreferencesRef.current, conversationArchiveOptions: next }); return next; });
+  const setGroupArchiveOption = (option: "includeProfile" | "includeMemories", checked: boolean) => setGroupArchiveOptions((current) => { const next = { ...current, [option]: checked }; persistPreferences({ ...exportPreferencesRef.current, groupArchiveOptions: next }); return next; });
+  const setPersistedGroupExportScope = (scope: "selected" | "unselected" | "all") => { setGroupExportScope(scope); persistPreferences({ ...exportPreferencesRef.current, groupExportScope: scope }); };
+  const exportCurrentBranchToClipboard = async () => {
     try {
-      await navigator.clipboard.writeText(createConversationCopy(conversation, messages, copyOptions));
-      setCopyStatus("copied");
+      await navigator.clipboard.writeText(createExportText(conversation, messages, exportOptions, archiveSections, conversationArchiveOptions));
+      setExportStatus("copied");
     } catch {
-      setCopyStatus("error");
+      setExportStatus("error");
     }
   };
   return <main className="reader">
     <div className="reader-actions">
+      <div className="conversation-search" role="search">
+        <input value={messageQuery} onChange={(event) => { setMessageQuery(event.target.value); setSearchIndex(0); }} onKeyDown={(event) => { if (event.key === "Enter") moveToHit(event.shiftKey ? -1 : 1); }} placeholder={locale === "zh-CN" ? "在当前对话中搜索" : "Search this conversation"} />
+        <span>{messageQuery ? `${searchHits.length ? Math.min(searchIndex + 1, searchHits.length) : 0}/${searchHits.length}` : ""}</span>
+        <button type="button" disabled={!searchHits.length} onClick={() => moveToHit(-1)} aria-label="Previous match">↑</button><button type="button" disabled={!searchHits.length} onClick={() => moveToHit(1)} aria-label="Next match">↓</button>
+      </div>
       <div className="export-control" ref={exportControl}>
         <button className="quiet-button export-button" type="button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>{t("export")}</button>
-      {exportOpen && <section className="copy-panel" aria-label="导出当前对话分支">
-        <div className="copy-panel-heading"><div><h2>{t("copyBranch")}</h2><p>{t("copyBranchHint")}</p></div><button className="copy-button" type="button" onClick={() => void copyCurrentBranch()}>{copyStatus === "copied" ? t("copied") : copyStatus === "error" ? t("copyFailed") : t("copyConversation")}</button></div>
-        <fieldset>
-          <legend>{t("include")}</legend>
-          <label><input type="checkbox" checked={copyOptions.includeTitle} onChange={(event) => setCopyOption("includeTitle", event.target.checked)} /> {t("title")}</label>
-          <label><input type="checkbox" checked={copyOptions.includeRoles} onChange={(event) => setCopyOption("includeRoles", event.target.checked)} /> {t("roles")}</label>
-          <label><input type="checkbox" checked={copyOptions.includeTimestamps} onChange={(event) => setCopyOption("includeTimestamps", event.target.checked)} /> {t("timestamps")}</label>
-          <label><input type="checkbox" checked={copyOptions.includeModels} onChange={(event) => setCopyOption("includeModels", event.target.checked)} /> {t("models")}</label>
-          <label><input type="checkbox" checked={copyOptions.includeMissingPlaceholders} onChange={(event) => setCopyOption("includeMissingPlaceholders", event.target.checked)} /> {t("missingPlaceholders")}</label>
-          <label><input type="checkbox" checked={copyOptions.includeContinuationPrompt} onChange={(event) => setCopyOption("includeContinuationPrompt", event.target.checked)} /> {t("continuation")}</label>
-        </fieldset>
-        {copyOptions.includeContinuationPrompt && <div className="continuation-prompt">
-          <div className="continuation-prompt-heading"><label htmlFor="continuation-prompt">{t("continuation")}</label><button type="button" className="text-button" onClick={() => { setCopyOptions((current) => ({ ...current, continuationPrompt: continuationPromptForLocale(locale) })); setContinuationPromptEdited(false); }}>{t("restoreDefault")}</button></div>
-          <textarea id="continuation-prompt" value={copyOptions.continuationPrompt} onChange={(event) => { setCopyOptions((current) => ({ ...current, continuationPrompt: event.target.value })); setContinuationPromptEdited(true); setCopyStatus("idle"); }} rows={6} spellCheck={false} />
-        </div>}
+      {exportOpen && <section className="export-panel" aria-label={t("export")}>
+        <div className="export-tabs" role="tablist" aria-label={t("export")}><button type="button" role="tab" aria-selected={exportTab === "conversation"} className={exportTab === "conversation" ? "active" : ""} onClick={() => setExportTab("conversation")}>{t("exportConversation")}</button><button type="button" role="tab" aria-selected={exportTab === "group"} className={exportTab === "group" ? "active" : ""} onClick={() => setExportTab("group")}>{t("exportGroup")}</button></div>
+        {exportTab === "conversation" ? <>
+          <div className="export-panel-heading"><div><h2>{t("exportBranch")}</h2><p>{t("exportBranchHint")}</p></div></div>
+          <fieldset><legend>{t("include")}</legend>
+            <label><input type="checkbox" checked={exportOptions.includeTitle} onChange={(event) => setExportOption("includeTitle", event.target.checked)} /> {t("title")}</label><label><input type="checkbox" checked={exportOptions.includeRoles} onChange={(event) => setExportOption("includeRoles", event.target.checked)} /> {t("roles")}</label><label><input type="checkbox" checked={exportOptions.includeTimestamps} onChange={(event) => setExportOption("includeTimestamps", event.target.checked)} /> {t("timestamps")}</label><label><input type="checkbox" checked={exportOptions.includeModels} onChange={(event) => setExportOption("includeModels", event.target.checked)} /> {t("models")}</label><label><input type="checkbox" checked={exportOptions.includeMissingPlaceholders} onChange={(event) => setExportOption("includeMissingPlaceholders", event.target.checked)} /> {t("missingPlaceholders")}</label><label><input type="checkbox" checked={exportOptions.includeContinuationPrompt} onChange={(event) => setExportOption("includeContinuationPrompt", event.target.checked)} /> {t("continuation")}</label><label><input type="checkbox" checked={conversationArchiveOptions.includeProfile} onChange={(event) => setConversationArchiveOption("includeProfile", event.target.checked)} /> {t("profile")}</label><label><input type="checkbox" checked={conversationArchiveOptions.includeMemories} onChange={(event) => setConversationArchiveOption("includeMemories", event.target.checked)} /> {t("memories")}</label>
+          </fieldset>
+          {exportOptions.includeContinuationPrompt && <div className="continuation-prompt">
+            <div className="continuation-prompt-heading"><label htmlFor="continuation-prompt">{t("continuation")}</label><button type="button" className="text-button" onClick={() => setContinuationPrompt(continuationPromptForLocale(locale))}>{t("restoreDefault")}</button></div>
+            <textarea id="continuation-prompt" value={exportOptions.continuationPrompt} onChange={(event) => setContinuationPrompt(event.target.value)} rows={6} spellCheck={false} />
+          </div>}
+          <div className="export-actions"><button className="copy-button export-action" type="button" onClick={() => void exportCurrentBranchToClipboard()}><Icon name="copy" />{exportStatus === "copied" ? t("copied") : exportStatus === "error" ? t("copyFailed") : t("copyConversation")}</button><button type="button" className="quiet-button export-action" onClick={() => downloadConversationMarkdown(conversation, messages, exportOptions, archiveSections, conversationArchiveOptions)}><Icon name="download" />{t("downloadMarkdown")}</button></div>
+        </> : <>
+          <div className="export-panel-heading"><div><h2>{t("exportGroup")}</h2><p>{t("exportGroupHint")}</p></div></div>
+          <fieldset><legend>{t("exportScope")}</legend><label><input type="radio" name="group-export-scope" checked={groupExportScope === "all"} onChange={() => setPersistedGroupExportScope("all")} /> {t("exportAll")}</label><label><input type="radio" name="group-export-scope" checked={groupExportScope === "selected"} onChange={() => setPersistedGroupExportScope("selected")} /> {t("exportSelected", { count: selectedConversationIds.length })}</label><label><input type="radio" name="group-export-scope" checked={groupExportScope === "unselected"} onChange={() => setPersistedGroupExportScope("unselected")} /> {t("exportUnselected", { count: allConversations.length - selectedConversationIds.length })}</label></fieldset>
+          <fieldset><legend>{t("include")}</legend><label><input type="checkbox" checked={groupArchiveOptions.includeProfile} onChange={(event) => setGroupArchiveOption("includeProfile", event.target.checked)} /> {t("profile")}</label><label><input type="checkbox" checked={groupArchiveOptions.includeMemories} onChange={(event) => setGroupArchiveOption("includeMemories", event.target.checked)} /> {t("memories")}</label></fieldset>
+          <div className="export-actions"><button type="button" className="quiet-button export-action" disabled={(groupExportScope === "selected" && !selectedConversationIds.length) || (groupExportScope === "unselected" && selectedConversationIds.length === allConversations.length)} onClick={() => void downloadConversationsZip(groupExportScope === "selected" ? allConversations.filter((item) => selectedConversationIds.includes(item.id)) : groupExportScope === "unselected" ? allConversations.filter((item) => !selectedConversationIds.includes(item.id)) : allConversations, archiveSections, groupArchiveOptions)}><Icon name="download" />{t("downloadZip")}</button></div>
+        </>}
       </section>}
       </div>
     </div>
@@ -173,6 +256,7 @@ export function ConversationReader({ conversation, onGoHome }: { conversation?: 
       <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{onGoHome ? <button type="button" className="reader-home-title" onClick={onGoHome} aria-label={`${t("backHome")}: ${conversation.metadata.title}`} title={conversation.metadata.title}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
     </header>
     <section className="messages" aria-label={t("messages")}>
+      {messages.filter((message) => message.role === "user").length > 1 && <nav className="message-jump-nav" aria-label={locale === "zh-CN" ? "提问导航" : "Prompt navigation"}>{messages.filter((message) => message.role === "user").map((message, index) => <button key={message.id} type="button" title={searchableMessageText(message).slice(0, 160)} onClick={() => messageElements.current.get(message.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{index + 1}</button>)}</nav>}
       {renderPath(messages, tree.roots, ROOT_SELECTION_KEY)}
       {!messages.length && <p>{t("noReadableMessages")}</p>}
     </section>

@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 export type AppRoute =
   | { kind: "home" }
   | { kind: "group"; groupId: string }
+  | { kind: "statistics"; groupId: string }
+  | { kind: "profile"; groupId: string }
+  | { kind: "memories"; groupId: string }
   | { kind: "section"; groupId: string; sectionId: string }
   | { kind: "conversation"; groupId: string; conversationId: string };
 
@@ -14,6 +17,9 @@ function part(value: string | undefined): string | undefined {
 export function parseRoute(pathname = window.location.pathname): AppRoute {
   const segments = pathname.split("/").filter(Boolean).map(part);
   if (segments.length === 2 && segments[0] === "groups" && segments[1]) return { kind: "group", groupId: segments[1] };
+  if (segments.length === 3 && segments[0] === "groups" && segments[1] && segments[2] === "statistics") return { kind: "statistics", groupId: segments[1] };
+  if (segments.length === 3 && segments[0] === "groups" && segments[1] && segments[2] === "profile") return { kind: "profile", groupId: segments[1] };
+  if (segments.length === 3 && segments[0] === "groups" && segments[1] && segments[2] === "memories") return { kind: "memories", groupId: segments[1] };
   if (segments.length === 4 && segments[0] === "groups" && segments[1] && segments[2] === "sections" && segments[3]) {
     return { kind: "section", groupId: segments[1], sectionId: segments[3] };
   }
@@ -27,6 +33,9 @@ export function routePath(route: AppRoute): string {
   if (route.kind === "home") return "/";
   const group = encodeURIComponent(route.groupId);
   if (route.kind === "group") return `/groups/${group}`;
+  if (route.kind === "statistics") return `/groups/${group}/statistics`;
+  if (route.kind === "profile") return `/groups/${group}/profile`;
+  if (route.kind === "memories") return `/groups/${group}/memories`;
   if (route.kind === "section") return `/groups/${group}/sections/${encodeURIComponent(route.sectionId)}`;
   return `/groups/${group}/conversations/${encodeURIComponent(route.conversationId)}`;
 }

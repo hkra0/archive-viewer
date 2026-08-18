@@ -12,7 +12,7 @@ interface GroupSwitcherProps {
   onRename(groupId: string): void;
   onDelete(groupId: string): void;
   onClearAll(): void;
-  onToast(message: string): void;
+  onToast(message: string, durationMs?: number): void;
   theme: ThemePreference;
   onThemeChange(theme: ThemePreference): void;
 }
@@ -49,7 +49,7 @@ export function GroupSwitcher({ activeGroup, groups, onSelect, onCreate, onRenam
   const confirmClear = () => {
     if (clearArmed) { if (armedTimeout.current) window.clearTimeout(armedTimeout.current); setClearArmed(false); action(onClearAll); return; }
     if (armedTimeout.current) window.clearTimeout(armedTimeout.current);
-    setArmedDeleteGroupId(undefined); setClearArmed(true); onToast(t("clearAllAgain"));
+    setArmedDeleteGroupId(undefined); setClearArmed(true); onToast(t("clearAllAgain"), 3000);
     armedTimeout.current = window.setTimeout(() => setClearArmed(false), 3000);
   };
   return <div className="group-switcher" ref={root}>

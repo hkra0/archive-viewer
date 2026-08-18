@@ -90,7 +90,7 @@ export async function listGroups(): Promise<ConversationGroup[]> {
 export async function loadGroup(groupId: string): Promise<GroupData | undefined> {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction([GROUPS, CONVERSATIONS, ARCHIVE_SECTIONS], "readonly");
+    const transaction = database.transaction([GROUPS, CONVERSATIONS, ARCHIVE_SECTIONS, BATCHES], "readonly");
     const group = await requestValue(transaction.objectStore(GROUPS).get(groupId)) as ConversationGroup | undefined;
     if (!group) {
       await transactionDone(transaction);
@@ -98,8 +98,9 @@ export async function loadGroup(groupId: string): Promise<GroupData | undefined>
     }
     const records = await requestValue(transaction.objectStore(CONVERSATIONS).index("groupId").getAll(IDBKeyRange.only(groupId))) as StoredConversation[];
     const sectionRecord = await requestValue(transaction.objectStore(ARCHIVE_SECTIONS).get(groupId)) as { groupId: string; sections: GroupData["sections"] } | undefined;
+    const batches = await requestValue(transaction.objectStore(BATCHES).index("groupId").getAll(IDBKeyRange.only(groupId))) as ImportBatch[];
     await transactionDone(transaction);
-    return { group, conversations: records.map((record) => hydrateConversation(record.conversation)), sections: sectionRecord?.sections || [] };
+    return { group, conversations: records.map((record) => hydrateConversation(record.conversation)), sections: sectionRecord?.sections || [], batches: batches.sort((a, b) => b.importedAt.localeCompare(a.importedAt)) };
   } finally {
     database.close();
   }

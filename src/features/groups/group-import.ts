@@ -34,14 +34,16 @@ export function newGroupFromImport(report: ImportReport, name?: string, locale?:
 
 export function mergeImportIntoGroup(current: GroupData | undefined, report: ImportReport, requestedName?: string, locale?: GroupNameLocale): GroupImportResult {
   const group = current?.group || newGroupFromImport(report, requestedName, locale);
-  const batch = {
+  const batchBase = {
     id: createId("import"),
     groupId: group.id,
     importedAt: new Date().toISOString(),
     sourceType: report.sourceType,
     sourceNames: report.archive.sourceFiles.map((file) => file.name),
+    sourceFiles: report.archive.sourceFiles.map(({ name, size, lastModified }) => ({ name, size, lastModified })),
   } as const;
-  const merged = mergeConversations(current?.conversations || [], report.archive.conversations, batch.id);
+  const merged = mergeConversations(current?.conversations || [], report.archive.conversations, batchBase.id);
+  const batch = { ...batchBase, stats: merged.stats };
   return {
     group: {
       ...group,
