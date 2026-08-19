@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ArchiveSection, UniversalConversation, UniversalMessage } from "../domain/conversation";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ArchiveSection, MessageContentBlock, UniversalConversation, UniversalMessage } from "../domain/conversation";
+import type { ReactNode } from "react";
 import { formatDate } from "../lib/dates";
 import { continuationPromptForLocale, DEFAULT_EXPORT_OPTIONS, type ConversationExportOptions } from "../features/export/create-conversation-copy";
 import { createExportText, DEFAULT_ARCHIVE_EXPORT_OPTIONS, downloadConversationMarkdown, downloadConversationsZip } from "../features/export/downloads";
@@ -26,26 +27,70 @@ function storedConversationExportOptions(preferences: ExportPreferences | undefi
   return preferences?.conversationExportOptions ?? preferences?.conversationCopyOptions;
 }
 
+const USER_MESSAGE_COLLAPSE_HEIGHT = 260;
+
 function MessageBody({ message, conversation }: { message: UniversalMessage; conversation: UniversalConversation }) {
   const { locale, t } = useI18n();
-  return <>{message.content.map((block, index) => {
-    if (block.type === "markdown") return <MarkdownContent key={index} markdown={block.markdown} attachments={conversation.attachments} />;
-    if (block.type === "text") return <p key={index}>{block.text}</p>;
-    if (block.type === "code") return <pre key={index}><code className={`language-${block.language || "markup"}`}>{block.code}</code></pre>;
+  const toolCallDetails = (block: Extract<MessageContentBlock, { type: "tool-call" }>) => <details className="tool-block-section"><summary>🔧 {locale === "zh-CN" ? "工具调用" : "Tool call"}: {block.name}</summary><pre><code>{JSON.stringify(block.input, null, 2)}</code></pre></details>;
+  const toolResultDetails = (block: Extract<MessageContentBlock, { type: "tool-result" }>) => <details className={`tool-block-section${block.isError ? " error" : ""}`}><summary>↩ {locale === "zh-CN" ? "工具结果" : "Tool result"}{block.name ? `: ${block.name}` : ""}{block.isError ? ` (${locale === "zh-CN" ? "错误" : "error"})` : ""}</summary><pre><code>{typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2)}</code></pre></details>;
+  const content: ReactNode[] = [];
+
+  for (let index = 0; index < message.content.length; index += 1) {
+    const block = message.content[index]!;
+    const followingBlock = message.content[index + 1];
+    if (block.type === "tool-call" && followingBlock?.type === "tool-result") {
+      content.push(<section className="structured-block tool-interaction" key={index} aria-label={locale === "zh-CN" ? "工具交互" : "Tool interaction"}>
+        {toolCallDetails(block)}
+        {toolResultDetails(followingBlock)}
+      </section>);
+      index += 1;
+      continue;
+    }
+    if (block.type === "markdown") { content.push(<MarkdownContent key={index} markdown={block.markdown} attachments={conversation.attachments} />); continue; }
+    if (block.type === "text") { content.push(<p key={index}>{block.text}</p>); continue; }
+    if (block.type === "code") { content.push(<pre key={index}><code className={`language-${block.language || "markup"}`}>{block.code}</code></pre>); continue; }
     if (block.type === "image") {
       const attachment = conversation.attachments.find((item) => item.id === block.attachmentId);
-      return attachment?.objectUrl ? <img key={index} className="message-image" src={attachment.objectUrl} alt={block.alt || attachment.name} /> : <p key={index}>{t("importedAttachment")}: {attachment?.name || t("unknownDate")}</p>;
+      content.push(attachment?.objectUrl ? <img key={index} className="message-image" src={attachment.objectUrl} alt={block.alt || attachment.name} /> : <p key={index}>{t("importedAttachment")}: {attachment?.name || t("unknownDate")}</p>);
+      continue;
     }
     if (block.type === "file") {
       const attachment = conversation.attachments.find((item) => item.id === block.attachmentId);
-      return <details className="structured-block attachment-block" key={index}><summary>📎 {attachment?.name || "Missing attachment"}{attachment?.size ? ` · ${Math.ceil(attachment.size / 1024)} KB` : ""}</summary>{attachment?.textContent && <pre><code>{attachment.textContent}</code></pre>}{attachment?.objectUrl && <a href={attachment.objectUrl} download={attachment.name}>{locale === "zh-CN" ? "下载附件" : "Download attachment"}</a>}</details>;
+      content.push(<details className="structured-block attachment-block" key={index}><summary>📎 {attachment?.name || "Missing attachment"}{attachment?.size ? ` · ${Math.ceil(attachment.size / 1024)} KB` : ""}</summary>{attachment?.textContent && <pre><code>{attachment.textContent}</code></pre>}{attachment?.objectUrl && <a href={attachment.objectUrl} download={attachment.name}>{locale === "zh-CN" ? "下载附件" : "Download attachment"}</a>}</details>);
+      continue;
     }
-    if (block.type === "thinking") return <details className="structured-block thinking-block" key={index}><summary>{locale === "zh-CN" ? "思考过程" : "Thinking"}{block.summaries?.length ? ` — ${block.summaries.join("；")}` : ""}</summary><pre>{block.thinking}</pre></details>;
-    if (block.type === "tool-call") return <details className="structured-block tool-block" key={index}><summary>🔧 {locale === "zh-CN" ? "工具调用" : "Tool call"}: {block.name}</summary><pre><code>{JSON.stringify(block.input, null, 2)}</code></pre></details>;
-    if (block.type === "tool-result") return <details className={`structured-block tool-block${block.isError ? " error" : ""}`} key={index}><summary>↩ {locale === "zh-CN" ? "工具结果" : "Tool result"}{block.name ? `: ${block.name}` : ""}{block.isError ? ` (${locale === "zh-CN" ? "错误" : "error"})` : ""}</summary><pre><code>{typeof block.output === "string" ? block.output : JSON.stringify(block.output, null, 2)}</code></pre></details>;
-    if (block.type === "empty") return <p className="empty-message" key={index}>⚠ {block.reason || (locale === "zh-CN" ? "导出数据中的这条消息为空。" : "This message is empty in the exported data.")}</p>;
-    return <details className="structured-block unknown-block" key={index}><summary>⚠ {locale === "zh-CN" ? "暂不支持的内容块（已保留）" : "Unsupported content block (preserved)"}</summary><pre><code>{JSON.stringify(block.raw, null, 2)}</code></pre></details>;
-  })}</>;
+    if (block.type === "thinking") { content.push(<details className="structured-block thinking-block" key={index}><summary>{locale === "zh-CN" ? "思考过程" : "Thinking"}{block.summaries?.length ? ` — ${block.summaries.join("；")}` : ""}</summary><pre>{block.thinking}</pre></details>); continue; }
+    if (block.type === "tool-call") { content.push(<section className="structured-block tool-interaction" key={index} aria-label={locale === "zh-CN" ? "工具交互" : "Tool interaction"}>{toolCallDetails(block)}</section>); continue; }
+    if (block.type === "tool-result") { content.push(<section className="structured-block tool-interaction" key={index} aria-label={locale === "zh-CN" ? "工具交互" : "Tool interaction"}>{toolResultDetails(block)}</section>); continue; }
+    if (block.type === "empty") { content.push(<p className="empty-message" key={index}>⚠ {block.reason || (locale === "zh-CN" ? "导出数据中的这条消息为空。" : "This message is empty in the exported data.")}</p>); continue; }
+    content.push(<details className="structured-block unknown-block" key={index}><summary>⚠ {locale === "zh-CN" ? "暂不支持的内容块（已保留）" : "Unsupported content block (preserved)"}</summary><pre><code>{JSON.stringify(block.raw, null, 2)}</code></pre></details>);
+  }
+  return <>{content}</>;
+}
+
+function UserMessageBody({ message, conversation }: { message: UniversalMessage; conversation: UniversalConversation }) {
+  const { t } = useI18n();
+  const content = useRef<HTMLDivElement>(null);
+  const [isLong, setIsLong] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return undefined;
+    const measure = () => setIsLong(element.scrollHeight > USER_MESSAGE_COLLAPSE_HEIGHT + 1);
+    setExpanded(false);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [message.id]);
+
+  return <div className="message-body">
+    <div ref={content} className={`message-content${isLong && !expanded ? " is-collapsed" : ""}`}>
+      <MessageBody message={message} conversation={conversation} />
+    </div>
+    {isLong && <button className="message-collapse-toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? t("showLess") : t("showMore")}</button>}
+  </div>;
 }
 
 interface ConversationTree {
@@ -149,7 +194,7 @@ function BranchNavigator({ siblings, selectedId, onSelect }: { siblings: Univers
   </nav>;
 }
 
-export function ConversationReader({ conversation, allConversations = [], archiveSections = [], selectedConversationIds = [], exportPreferences, onExportPreferencesChange, onGoHome }: { conversation?: UniversalConversation; allConversations?: UniversalConversation[]; archiveSections?: ArchiveSection[]; selectedConversationIds?: string[]; exportPreferences?: ExportPreferences; onExportPreferencesChange?(preferences: ExportPreferences): void; onGoHome?(): void }) {
+export function ConversationReader({ conversation, allConversations = [], archiveSections = [], selectedConversationIds = [], exportPreferences, onExportPreferencesChange, onTitleChange }: { conversation?: UniversalConversation; allConversations?: UniversalConversation[]; archiveSections?: ArchiveSection[]; selectedConversationIds?: string[]; exportPreferences?: ExportPreferences; onExportPreferencesChange?(preferences: ExportPreferences): void; onTitleChange?(title: string): void }) {
   const { locale, t } = useI18n();
   const tree = useMemo(() => buildConversationTree(conversation?.messages || []), [conversation]);
   const [selection, setSelection] = useState<Record<string, string>>({});
@@ -165,7 +210,10 @@ export function ConversationReader({ conversation, allConversations = [], archiv
   const [exportOpen, setExportOpen] = useState(false);
   const [messageQuery, setMessageQuery] = useState("");
   const [searchIndex, setSearchIndex] = useState(0);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(conversation?.metadata.title || "");
   const exportControl = useRef<HTMLDivElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
   const messageElements = useRef(new Map<string, HTMLElement>());
   const exportPreferencesRef = useRef<ExportPreferences | undefined>(exportPreferences);
   useEffect(() => { setSelection({}); setExportStatus("idle"); setCopiedMessageId(undefined); setFailedMessageId(undefined); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); messageElements.current.clear(); }, [conversation?.id]);
@@ -188,6 +236,13 @@ export function ConversationReader({ conversation, allConversations = [], archiv
     document.addEventListener("mousedown", closeWhenOutside);
     return () => document.removeEventListener("mousedown", closeWhenOutside);
   }, [exportOpen]);
+  useEffect(() => {
+    setEditingTitle(false);
+    setTitleDraft(conversation?.metadata.title || "");
+  }, [conversation?.id, conversation?.metadata.title]);
+  useEffect(() => {
+    if (editingTitle) titleInput.current?.focus();
+  }, [editingTitle]);
   if (!conversation) return <main className="reader empty-reader"><p>{t("noReadableMessages")}</p></main>;
   const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : conversation.messages;
   const normalisedQuery = messageQuery.trim().toLocaleLowerCase(locale);
@@ -214,7 +269,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
     return <div key={message.id} ref={(element) => { if (element) messageElements.current.set(message.id, element); else messageElements.current.delete(message.id); }} className={`message-stack ${message.role}${isMissing ? " missing" : ""}${isHit ? " search-hit" : ""}${currentHit?.id === message.id ? " current-search-hit" : ""}`}>
       <strong className="message-role">{t(`role_${message.role}`)}</strong>
       <article className={`message ${message.role}${isMissing ? " missing" : ""}`}>
-        <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>
+        {message.role === "user" ? <UserMessageBody message={message} conversation={conversation} /> : <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>}
         {isMissing && <footer>{t("inferredMissing")}</footer>}
       </article>
       <div className="message-branch-actions"><button className="quiet-button message-copy-button" type="button" onClick={() => void copyMessage(message)} aria-label={copiedMessageId === message.id ? t("copied") : failedMessageId === message.id ? t("copyFailed") : t("copyMessage")} title={copiedMessageId === message.id ? t("copied") : failedMessageId === message.id ? t("copyFailed") : t("copyMessage")}><Icon name="copy" /></button><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt, locale, t("unknownDate"))}</time></div>
@@ -251,6 +306,20 @@ export function ConversationReader({ conversation, allConversations = [], archiv
       setCopiedMessageId(undefined);
     }
   };
+  const commitTitle = () => {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) {
+      setTitleDraft(conversation.metadata.title);
+      setEditingTitle(false);
+      return;
+    }
+    setEditingTitle(false);
+    if (nextTitle !== conversation.metadata.title) onTitleChange?.(nextTitle);
+  };
+  const cancelTitleEdit = () => {
+    setTitleDraft(conversation.metadata.title);
+    setEditingTitle(false);
+  };
   return <main className="reader">
     <div className="reader-actions">
       <div className="conversation-search" role="search">
@@ -282,7 +351,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
       </div>
     </div>
     <header className="reader-header">
-      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{onGoHome ? <button type="button" className="reader-home-title" onClick={onGoHome} aria-label={`${t("backHome")}: ${conversation.metadata.title}`} title={conversation.metadata.title}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
+      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{editingTitle ? <input ref={titleInput} className="reader-title-input" value={titleDraft} maxLength={240} aria-label={t("editTitle")} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } if (event.key === "Escape") { event.preventDefault(); cancelTitleEdit(); } }} /> : onTitleChange ? <button type="button" className="reader-title-edit-button" onClick={() => { setTitleDraft(conversation.metadata.title); setEditingTitle(true); }} aria-label={`${t("editTitle")}: ${conversation.metadata.title}`} title={t("editTitle")}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
     </header>
     <section className="messages" aria-label={t("messages")}>
       {messages.filter((message) => message.role === "user").length > 1 && <nav className="message-jump-nav" aria-label={locale === "zh-CN" ? "提问导航" : "Prompt navigation"}>{messages.filter((message) => message.role === "user").map((message, index) => <button key={message.id} type="button" title={searchableMessageText(message).slice(0, 160)} onClick={() => messageElements.current.get(message.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{index + 1}</button>)}</nav>}

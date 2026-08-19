@@ -223,7 +223,11 @@ export default function App() {
     setImporting(true);
     try {
       const report = await importEntries(selection.entries, selection.sourceType);
-      const formattedWarnings = report.warnings.map((warning) => warning.code === "EMPTY_CONVERSATIONS_PRESERVED" ? { ...warning, message: locale === "zh-CN" ? `为保证完整性，已保留 ${warning.message} 个空对话。` : `Preserved ${warning.message} empty conversations for completeness.` } : warning);
+      const formattedWarnings = report.warnings.map((warning) => {
+        if (warning.code === "EMPTY_CONVERSATIONS_PRESERVED") return { ...warning, message: locale === "zh-CN" ? `为保证完整性，已保留 ${warning.message} 个空对话。` : `Preserved ${warning.message} empty conversations for completeness.` };
+        if (warning.code === "EMPTY_MESSAGES_PRESERVED" && warning.count !== undefined) return { ...warning, message: t("emptyMessagesPreserved", { count: warning.count, conversations: warning.conversationCount || 1 }) };
+        return warning;
+      });
       setWarnings(formattedWarnings); setErrors(report.errors);
       if (!report.archive.conversations.length && !report.archive.sections?.length) return;
       const needsDestinationChoice = groups.length > 0;
@@ -295,6 +299,22 @@ export default function App() {
     setActive(data); setGroups((current) => current.map((group) => group.id === data.group.id ? data.group : group));
     void saveGroup(data).catch((error: unknown) => setErrors((current) => [...current, error instanceof Error ? error.message : "Unable to save export preferences."]));
   }
+  async function renameConversation(conversationId: string, title: string): Promise<void> {
+    if (!active) return;
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    const conversation = active.conversations.find((item) => item.id === conversationId);
+    if (!conversation || conversation.metadata.title === nextTitle) return;
+    const data = {
+      ...active,
+      group: { ...active.group, updatedAt: new Date().toISOString() },
+      conversations: active.conversations.map((item) => item.id === conversationId ? { ...item, metadata: { ...item.metadata, title: nextTitle } } : item),
+    };
+    setActive(data);
+    setGroups((current) => current.map((group) => group.id === data.group.id ? data.group : group));
+    try { await saveGroup(data); }
+    catch (error) { setErrors((current) => [...current, error instanceof Error ? error.message : "Unable to save conversation title."]); }
+  }
   function dismissFeedback(kind: "error" | "warning", index: number): void { if (kind === "error") setErrors((current) => current.filter((_, currentIndex) => currentIndex !== index)); else setWarnings((current) => current.filter((_, currentIndex) => currentIndex !== index)); }
   function confirmDialog(values: GroupFormValues): void { if (dialog === "create") void createGroup(values); if (dialog === "rename") void renameGroup(values); }
 
@@ -315,7 +335,7 @@ export default function App() {
         </div>
         <GroupSwitcher activeGroup={active.group} groups={groups} onSelect={(id) => void selectGroup(id)} onCreate={() => setDialog("create")} onRename={(id) => { setEditingGroupId(id); setDialog("rename"); }} onDelete={(id) => void removeGroup(id)} onClearAll={() => void clearAll()} onToast={showToast} theme={theme} onThemeChange={setTheme} />
       </aside>
-      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span title={showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}>{showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : showStatistics ? <ArchiveHealth data={active} /> : selectedSection ? <ArchiveSectionReader section={selectedSection} /> : <ConversationReader conversation={selected} allConversations={active.conversations} archiveSections={active.sections} selectedConversationIds={markedIds} exportPreferences={active.group.exportPreferences} onExportPreferencesChange={updateExportPreferences} onGoHome={showImportHome} />}</div>
+      <div className="reader-wrap"><header className="mobile-reader-bar"><button type="button" aria-label={t("openList")} onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button><span title={showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}>{showHome ? t("home") : showStatistics ? t("statistics") : selectedSection ? selectedSection.title || archiveSectionLabel(selectedSection.kind, t) : selected?.metadata.title || active.group.name}</span></header>{showHome ? <ImportHome embedded importing={importing} onImport={(selection) => void handleImport(selection)} /> : showStatistics ? <ArchiveHealth data={active} /> : selectedSection ? <ArchiveSectionReader section={selectedSection} /> : <ConversationReader conversation={selected} allConversations={active.conversations} archiveSections={active.sections} selectedConversationIds={markedIds} exportPreferences={active.group.exportPreferences} onExportPreferencesChange={updateExportPreferences} onTitleChange={(title) => { if (selected) void renameConversation(selected.id, title); }} />}</div>
       {(errors.length > 0 || warnings.length > 0) && <FeedbackQueue floating errors={errors} warnings={warnings} onDismiss={dismissFeedback} />}
     </div>}
     {dialog && <ManagementDialog key={`${dialog}-${editingGroupId || "new"}`} kind={dialog} initialName={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.name || "" : ""} initialNote={dialog === "rename" ? groups.find((group) => group.id === editingGroupId)?.note || groups.find((group) => group.id === editingGroupId)?.account?.email || "" : ""} onCancel={() => { setEditingGroupId(undefined); setDialog(undefined); }} onConfirm={confirmDialog} />}
