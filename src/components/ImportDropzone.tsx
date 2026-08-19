@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { ImportEntry } from "../features/import/import-pipeline";
 import { Icon } from "./Icons";
 import { useI18n } from "../lib/i18n";
@@ -10,9 +10,9 @@ export interface ImportSelection {
 
 interface ImportDropzoneProps {
   compact?: boolean;
+  iconOnly?: boolean;
   disabled?: boolean;
   onImport(selection: ImportSelection): void;
-  onOpenImportHome?(): void;
 }
 
 interface WebkitEntry {
@@ -61,13 +61,10 @@ export async function droppedEntries(dataTransfer: DataTransfer): Promise<Import
   return { entries: relativeEntries(dataTransfer.files), sourceType: "files" };
 }
 
-export function ImportDropzone({ compact, disabled, onImport, onOpenImportHome }: ImportDropzoneProps) {
+export function ImportDropzone({ compact, iconOnly, disabled, onImport }: ImportDropzoneProps) {
   const { t } = useI18n();
   const filesInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-
-  useEffect(() => { folderInput.current?.setAttribute("webkitdirectory", ""); }, []);
 
   function submit(files: FileList | null, sourceType: "files" | "folder"): void {
     const entries = relativeEntries(files);
@@ -76,11 +73,6 @@ export function ImportDropzone({ compact, disabled, onImport, onOpenImportHome }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>): void {
     submit(event.target.files, "files");
-    event.target.value = "";
-  }
-
-  function onFolderChange(event: ChangeEvent<HTMLInputElement>): void {
-    submit(event.target.files, "folder");
     event.target.value = "";
   }
 
@@ -97,26 +89,33 @@ export function ImportDropzone({ compact, disabled, onImport, onOpenImportHome }
     }
   }
 
-  if (compact) return <div className="compact-import">
-    <button type="button" className="new-import-button" disabled={disabled} onClick={onOpenImportHome}><Icon name="import" />{disabled ? t("importing") : t("import")}</button>
-  </div>;
-
-  return <section
-    className={`dropzone${compact ? " compact" : ""}${dragging ? " is-dragging" : ""}`}
-    aria-label="导入对话文件"
+  if (compact) return <div
+    className={`compact-import${dragging ? " is-dragging" : ""}`}
     onDragEnter={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }}
     onDragOver={(event) => event.preventDefault()}
     onDragLeave={() => setDragging(false)}
     onDrop={(event) => void onDrop(event)}
   >
     <input ref={filesInput} type="file" multiple accept=".zip,.json,.md,.markdown" onChange={onFileChange} hidden />
-    <input ref={folderInput} type="file" multiple onChange={onFolderChange} hidden />
+    <button type="button" className="new-import-button" aria-label={iconOnly ? t("import") : undefined} disabled={disabled} onClick={() => filesInput.current?.click()}><Icon name="import" />{!iconOnly && (disabled ? t("importing") : t("import"))}</button>
+  </div>;
+
+  return <section
+    className={`dropzone${compact ? " compact" : ""}${dragging ? " is-dragging" : ""}`}
+    aria-label="导入对话文件"
+    aria-disabled={disabled}
+    role="button"
+    tabIndex={disabled ? -1 : 0}
+    onClick={() => { if (!disabled) filesInput.current?.click(); }}
+    onKeyDown={(event) => { if (!disabled && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); filesInput.current?.click(); } }}
+    onDragEnter={(event) => { event.preventDefault(); if (!disabled) setDragging(true); }}
+    onDragOver={(event) => event.preventDefault()}
+    onDragLeave={() => setDragging(false)}
+    onDrop={(event) => void onDrop(event)}
+  >
+    <input ref={filesInput} type="file" multiple accept=".zip,.json,.md,.markdown" onChange={onFileChange} hidden />
     <span className="dropzone-icon"><Icon name="import" /></span>
     <strong>{disabled ? t("importing") : t("importTitle")}</strong>
     <span>{t("importHint")}</span>
-    <div className="import-actions">
-      <button type="button" className="primary-button" disabled={disabled} onClick={() => filesInput.current?.click()}>{t("importFile")}</button>
-      <button type="button" className="text-button" disabled={disabled} onClick={() => folderInput.current?.click()}>{t("importFolder")}</button>
-    </div>
   </section>;
 }
