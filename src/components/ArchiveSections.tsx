@@ -45,15 +45,25 @@ export function ArchiveSectionReader({ section }: { section: ArchiveSection }) {
       {section.items.map((item, index) => {
         const itemKey = `${section.id}:${item.id}:${index}`;
         const showHeading = item.title || section.items.length > 1 || (section.kind === "memories" && item.body);
-        return <article className="archive-card" key={`${item.id}-${index}`}>
-        {showHeading && <div className="archive-card-heading">
-          {(item.title || section.items.length > 1) && <h2>{item.title || t("archiveItem", { count: index + 1 })}</h2>}
-          {section.kind === "memories" && item.body && <button className="quiet-button archive-copy-button" type="button" onClick={() => void copyMemory(itemKey, item.body!)} aria-label={copiedItemId === itemKey ? t("copied") : failedItemId === itemKey ? t("copyFailed") : t("copyMemory")} title={t("copyMemory")}><Icon name="copy" /></button>}
-        </div>}
-        {item.body && <div className="archive-card-body"><MarkdownContent markdown={item.body} attachments={[]} /></div>}
-        {item.fields && <dl>{Object.entries(item.fields).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
-        {(item.updatedAt || item.createdAt) && <footer>{formatDate(item.updatedAt || item.createdAt, locale, t("unknownDate"))}</footer>}
-      </article>;
+        const source = item.fields?.Source;
+        const fields = Object.entries(item.fields || {}).filter(([label]) => label !== "Source");
+        const date = item.updatedAt || item.createdAt;
+        return <div className="archive-card-stack" key={`${item.id}-${index}`}>
+          <article className="archive-card">
+            {showHeading && <div className="archive-card-heading">
+              {(item.title || section.items.length > 1) && <h2>{item.title || t("archiveItem", { count: index + 1 })}</h2>}
+            </div>}
+            {item.body && <div className="archive-card-body"><MarkdownContent markdown={item.body} attachments={[]} /></div>}
+            {fields.length > 0 && <dl>{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+          </article>
+          {(source || (section.kind === "memories" && item.body) || date) && <footer className="archive-card-footer">
+            {(source || (section.kind === "memories" && item.body)) && <div className="archive-card-actions">
+              {section.kind === "memories" && item.body && <button className="quiet-button archive-copy-button" type="button" onClick={() => void copyMemory(itemKey, item.body!)} aria-label={copiedItemId === itemKey ? t("copied") : failedItemId === itemKey ? t("copyFailed") : t("copyMemory")} title={t("copyMemory")}><Icon name="copy" /></button>}
+              {source && <span className="archive-source">{source}</span>}
+            </div>}
+            {date && <time>{formatDate(date, locale, t("unknownDate"))}</time>}
+          </footer>}
+        </div>;
       })}
     </div>
   </main>;

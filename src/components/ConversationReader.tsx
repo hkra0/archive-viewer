@@ -69,6 +69,23 @@ function searchableMessageText(message: UniversalMessage): string {
   }).join(" ");
 }
 
+export function messageClipboardText(message: UniversalMessage, conversation: UniversalConversation): string {
+  const attachmentName = (attachmentId: string) => conversation.attachments.find((attachment) => attachment.id === attachmentId)?.name || attachmentId;
+  const serialise = (value: unknown) => JSON.stringify(value, null, 2) || "";
+  return message.content.map((block) => {
+    if (block.type === "markdown") return block.markdown;
+    if (block.type === "text") return block.text;
+    if (block.type === "code") return block.code;
+    if (block.type === "image") return block.alt || attachmentName(block.attachmentId);
+    if (block.type === "file") return attachmentName(block.attachmentId);
+    if (block.type === "thinking") return block.thinking;
+    if (block.type === "tool-call") return `${block.name}\n${serialise(block.input)}`.trim();
+    if (block.type === "tool-result") return `${block.name || ""}\n${typeof block.output === "string" ? block.output : serialise(block.output)}`.trim();
+    if (block.type === "empty") return block.reason || "";
+    return serialise(block.raw);
+  }).filter(Boolean).join("\n\n");
+}
+
 function byDateThenInput(a: UniversalMessage, b: UniversalMessage): number {
   const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
   const bTime = b.createdAt ? new Date(b.createdAt).getTime() : Number.NaN;
@@ -143,13 +160,15 @@ export function ConversationReader({ conversation, allConversations = [], archiv
   const [exportTab, setExportTab] = useState<"conversation" | "group">("conversation");
   const [groupExportScope, setGroupExportScope] = useState<"selected" | "unselected" | "all">(() => exportPreferences?.groupExportScope || "all");
   const [exportStatus, setExportStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [copiedMessageId, setCopiedMessageId] = useState<string>();
+  const [failedMessageId, setFailedMessageId] = useState<string>();
   const [exportOpen, setExportOpen] = useState(false);
   const [messageQuery, setMessageQuery] = useState("");
   const [searchIndex, setSearchIndex] = useState(0);
   const exportControl = useRef<HTMLDivElement>(null);
   const messageElements = useRef(new Map<string, HTMLElement>());
   const exportPreferencesRef = useRef<ExportPreferences | undefined>(exportPreferences);
-  useEffect(() => { setSelection({}); setExportStatus("idle"); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); messageElements.current.clear(); }, [conversation?.id]);
+  useEffect(() => { setSelection({}); setExportStatus("idle"); setCopiedMessageId(undefined); setFailedMessageId(undefined); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); messageElements.current.clear(); }, [conversation?.id]);
   useEffect(() => {
     exportPreferencesRef.current = exportPreferences;
     setExportOptions(exportOptionsForLocale(storedConversationExportOptions(exportPreferences), locale));
@@ -198,7 +217,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
         <div className="message-body"><MessageBody message={message} conversation={conversation} /></div>
         {isMissing && <footer>{t("inferredMissing")}</footer>}
       </article>
-      <div className="message-branch-actions"><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt, locale, t("unknownDate"))}</time></div>
+      <div className="message-branch-actions"><button className="quiet-button message-copy-button" type="button" onClick={() => void copyMessage(message)} aria-label={copiedMessageId === message.id ? t("copied") : failedMessageId === message.id ? t("copyFailed") : t("copyMessage")} title={copiedMessageId === message.id ? t("copied") : failedMessageId === message.id ? t("copyFailed") : t("copyMessage")}><Icon name="copy" /></button><BranchNavigator siblings={siblings} selectedId={message.id} onSelect={(id) => selectBranch(parentKey, id)} /><time>{formatDate(message.createdAt, locale, t("unknownDate"))}</time></div>
     </div>;
   });
   const persistPreferences = (next: ExportPreferences) => { exportPreferencesRef.current = next; onExportPreferencesChange?.(next); };
@@ -220,6 +239,16 @@ export function ConversationReader({ conversation, allConversations = [], archiv
       setExportStatus("copied");
     } catch {
       setExportStatus("error");
+    }
+  };
+  const copyMessage = async (message: UniversalMessage) => {
+    try {
+      await navigator.clipboard.writeText(messageClipboardText(message, conversation));
+      setCopiedMessageId(message.id);
+      setFailedMessageId(undefined);
+    } catch {
+      setFailedMessageId(message.id);
+      setCopiedMessageId(undefined);
     }
   };
   return <main className="reader">
