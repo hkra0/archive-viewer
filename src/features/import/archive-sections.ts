@@ -170,15 +170,86 @@ export function extractArchiveSections(candidate: ImportCandidate): ArchiveSecti
   try { return jsonSections(candidate, JSON.parse(candidate.text)); } catch { return []; }
 }
 
+const UNIFIED_PROFILE_SECTION_ID = "profile";
+const PROFILE_SOURCE_FIELD = "Source";
+const PROVIDER_NAMES: Record<string, string> = {
+  chatgpt: "ChatGPT", claude: "Claude", grok: "Grok", gemini: "Gemini", deepseek: "DeepSeek",
+};
+
+function sourceLabels(...values: Array<string | undefined>): string | undefined {
+  const labels = [...new Set(values.flatMap((value) => value?.split(" · ") || []).map((value) => value.trim()).filter(Boolean))];
+  return labels.length ? labels.join(" · ") : undefined;
+}
+
+function archiveItemWithSource(item: ArchiveRecord, providerId?: string): ArchiveRecord {
+  const source = sourceLabels(item.fields?.[PROFILE_SOURCE_FIELD], providerId && (PROVIDER_NAMES[providerId] || providerId));
+  return source ? { ...item, fields: { ...(item.fields || {}), [PROFILE_SOURCE_FIELD]: source } } : item;
+}
+
+function profileRecordKey(item: ArchiveRecord): string {
+  const fields = item.fields || {};
+  const email = fields.Email?.trim().toLocaleLowerCase();
+  const userId = fields["User ID"]?.trim();
+  if (email || userId) return `identity:${email || ""}\u0000${userId || ""}`;
+  return `details:${fields.Name?.trim().toLocaleLowerCase() || ""}\u0000${fields.Username?.trim().toLocaleLowerCase() || ""}`;
+}
+
+function mergeProfileRecord(existing: ArchiveRecord, incoming: ArchiveRecord): ArchiveRecord {
+  const source = sourceLabels(existing.fields?.[PROFILE_SOURCE_FIELD], incoming.fields?.[PROFILE_SOURCE_FIELD]);
+  return {
+    ...existing,
+    title: existing.title || incoming.title,
+    body: existing.body || incoming.body,
+    fields: { ...(incoming.fields || {}), ...(existing.fields || {}), ...(source ? { [PROFILE_SOURCE_FIELD]: source } : {}) },
+    createdAt: existing.createdAt || incoming.createdAt,
+    updatedAt: existing.updatedAt || incoming.updatedAt,
+  };
+}
+
+function normalizedSection(section: ArchiveSection): ArchiveSection {
+  // Profile is a group-level identity, not a provider-specific navigation item.
+  // Keeping one stable ID also makes /profile unambiguous after multiple imports.
+  return section.kind === "profile"
+    ? { ...section, id: UNIFIED_PROFILE_SECTION_ID, providerId: undefined, items: section.items.map((item) => archiveItemWithSource(item, section.providerId)) }
+    : section.kind === "memories"
+      ? { ...section, items: section.items.map((item) => archiveItemWithSource(item, section.providerId)) }
+      : section;
+}
+
+/**
+ * Profile and memory files often have generic names such as users.json.
+ * When the surrounding import contains exactly one recognised provider, use
+ * that unambiguous context to label otherwise anonymous archive records.
+ */
+export function annotateArchiveSectionSources(sections: ArchiveSection[], fallbackProviderId?: string): ArchiveSection[] {
+  if (!fallbackProviderId) return sections;
+  return sections.map((section) => (section.kind === "profile" || section.kind === "memories")
+    ? { ...section, items: section.items.map((item) => archiveItemWithSource(item, section.providerId || fallbackProviderId)) }
+    : section);
+}
+
 export function mergeArchiveSections(existing: ArchiveSection[] = [], incoming: ArchiveSection[] = []): ArchiveSection[] {
-  const merged = new Map(existing.map((section) => [section.id, { ...section, items: [...section.items] }]));
-  for (const section of incoming) {
+  const merged = new Map<string, ArchiveSection>();
+  for (const source of [...existing, ...incoming]) {
+    const section = normalizedSection(source);
     const current = merged.get(section.id);
-    if (!current) { merged.set(section.id, { ...section, items: [...section.items] }); continue; }
-    const seen = new Set(current.items.map((item) => `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`));
+    if (!current) {
+      merged.set(section.id, { ...section, items: [] });
+    }
+    const target = merged.get(section.id)!;
+    const seen = new Map(target.items.map((item) => [section.kind === "profile" ? profileRecordKey(item) : `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`, item]));
     for (const item of section.items) {
-      const key = `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`;
-      if (!seen.has(key)) { current.items.push(item); seen.add(key); }
+      const key = section.kind === "profile" ? profileRecordKey(item) : `${item.id}\u0000${item.title || ""}\u0000${item.body || ""}`;
+      const duplicate = seen.get(key);
+      if (!duplicate) {
+        target.items.push(item);
+        seen.set(key, item);
+      } else if (section.kind === "profile") {
+        const index = target.items.indexOf(duplicate);
+        const profile = mergeProfileRecord(duplicate, item);
+        target.items[index] = profile;
+        seen.set(key, profile);
+      }
     }
   }
   return [...merged.values()].filter((section) => section.items.length);

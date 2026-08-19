@@ -1,4 +1,5 @@
 import type { UniversalAttachment, UniversalConversation } from "../../domain/conversation";
+import { annotateArchiveSectionSources, mergeArchiveSections } from "../import/archive-sections";
 import type { ConversationGroup, GroupData, ImportBatch } from "./group-types";
 import { THEME_STORAGE_KEY } from "../../lib/theme";
 
@@ -100,7 +101,13 @@ export async function loadGroup(groupId: string): Promise<GroupData | undefined>
     const sectionRecord = await requestValue(transaction.objectStore(ARCHIVE_SECTIONS).get(groupId)) as { groupId: string; sections: GroupData["sections"] } | undefined;
     const batches = await requestValue(transaction.objectStore(BATCHES).index("groupId").getAll(IDBKeyRange.only(groupId))) as ImportBatch[];
     await transactionDone(transaction);
-    return { group, conversations: records.map((record) => hydrateConversation(record.conversation)), sections: sectionRecord?.sections || [], batches: batches.sort((a, b) => b.importedAt.localeCompare(a.importedAt)) };
+    const conversations = records.map((record) => hydrateConversation(record.conversation));
+    // Normalise older groups in memory too, so profile navigation is repaired
+    // immediately instead of requiring another import to trigger a merge.
+    const normalisedSections = mergeArchiveSections([], sectionRecord?.sections || []);
+    const providerIds = [...new Set(conversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
+    const sections = providerIds.length === 1 ? annotateArchiveSectionSources(normalisedSections, providerIds[0]) : normalisedSections;
+    return { group, conversations, sections, batches: batches.sort((a, b) => b.importedAt.localeCompare(a.importedAt)) };
   } finally {
     database.close();
   }

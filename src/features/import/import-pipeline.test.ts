@@ -30,4 +30,15 @@ describe("hasReadableConversationContent", () => {
     expect(report.account).toEqual({ displayName: "Grace", email: "grace@example.com" });
     expect(JSON.stringify(report.archive.sections)).not.toContain("secret");
   });
+
+  it("labels anonymous profile and memory files with an unambiguous conversation provider", async () => {
+    const profile = new File([JSON.stringify([{ full_name: "Ada", email: "ada@example.com" }])], "users.json", { type: "application/json" });
+    const memories = new File([JSON.stringify([{ account_uuid: "account-1", conversations_memory: "Prefers concise answers" }])], "memories.json", { type: "application/json" });
+    const conversations = new File([JSON.stringify([{ id: "conversation-1", mapping: { message: { message: { author: { role: "user" }, content: { parts: ["Hello"] } } } } }])], "conversations.json", { type: "application/json" });
+
+    const report = await importFiles([profile, memories, conversations]);
+
+    expect(report.archive.sections?.find((section) => section.kind === "profile")?.items[0]?.fields?.Source).toBe("ChatGPT");
+    expect(report.archive.sections?.find((section) => section.kind === "memories")?.items[0]?.fields?.Source).toBe("ChatGPT");
+  });
 });

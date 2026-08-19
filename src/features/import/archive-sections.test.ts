@@ -39,6 +39,30 @@ describe("extractArchiveSections", () => {
     expect(mergeArchiveSections([section], [section])[0]?.items).toHaveLength(1);
   });
 
+  it("unifies profiles from different providers into one section and deduplicates re-imports", () => {
+    const chatgptProfile = { id: "chatgpt-profile", kind: "profile" as const, providerId: "chatgpt", items: [{ id: "one", title: "Ada", fields: { Name: "Ada", Email: "ada@example.com", "User ID": "chatgpt-user" } }] };
+    const claudeProfile = { id: "claude-profile", kind: "profile" as const, providerId: "claude", items: [{ id: "two", title: "Ada", fields: { Name: "Ada", Email: "ada@example.com", "User ID": "claude-user" } }] };
+    const repeatedChatgptProfile = { ...chatgptProfile, items: [{ id: "three", title: "Ada", fields: { Name: "Ada", Email: "ada@example.com", "User ID": "chatgpt-user", Plan: "Plus" } }] };
+
+    const sections = mergeArchiveSections([chatgptProfile, claudeProfile], [repeatedChatgptProfile]);
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toMatchObject({ id: "profile", kind: "profile" });
+    expect(sections[0]?.providerId).toBeUndefined();
+    expect(sections[0]?.items).toHaveLength(2);
+    expect(sections[0]?.items[0]?.fields).toMatchObject({ Plan: "Plus", Source: "ChatGPT" });
+    expect(sections[0]?.items[1]?.fields).toMatchObject({ Source: "Claude" });
+  });
+
+  it("combines recognised sources when the same profile is imported again", () => {
+    const profile = (providerId: "chatgpt" | "gemini") => ({ id: `${providerId}-profile`, kind: "profile" as const, providerId, items: [{ id: providerId, fields: { Email: "ada@example.com" } }] });
+
+    const sections = mergeArchiveSections([profile("chatgpt")], [profile("gemini")]);
+
+    expect(sections[0]?.items).toHaveLength(1);
+    expect(sections[0]?.items[0]?.fields?.Source).toBe("ChatGPT · Gemini");
+  });
+
   it("supports future Gemini saved-info and instructions files while hiding empty pages", () => {
     expect(extractArchiveSections({ name: "Takeout/Gemini/gemini_saved_info_data.html", text: "<div></div>" })).toEqual([]);
     expect(extractArchiveSections({ name: "Takeout/Gemini/gemini_saved_info_data.html", text: "<div>Prefers concise answers</div>" })[0]).toMatchObject({ kind: "memories", providerId: "gemini", items: [{ body: "Prefers concise answers" }] });

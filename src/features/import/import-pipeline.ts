@@ -3,7 +3,7 @@ import { detectAdapter } from "../../adapters/registry";
 import type { ImportCandidate } from "../../adapters/adapter";
 import { ConversationArchiveSchema, type ArchiveSection, type ConversationArchive, type ImportWarning, type MessageContentBlock, type UniversalConversation } from "../../domain/conversation";
 import { IMPORT_LIMITS } from "./import-limits";
-import { extractArchiveSections, mergeArchiveSections } from "./archive-sections";
+import { annotateArchiveSectionSources, extractArchiveSections, mergeArchiveSections } from "./archive-sections";
 
 export type ImportSourceType = "zip" | "folder" | "files";
 
@@ -217,6 +217,8 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
     }
   }
   if (preservedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATIONS_PRESERVED", message: String(preservedEmptyConversations) });
+  const providerIds = [...new Set(conversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
+  if (providerIds.length === 1) sections = annotateArchiveSectionSources(sections, providerIds[0]);
   const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations, sections });
   return { archive, warnings, errors, sourceType, account };
 }
