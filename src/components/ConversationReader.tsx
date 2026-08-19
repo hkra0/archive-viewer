@@ -210,13 +210,15 @@ export function ConversationReader({ conversation, allConversations = [], archiv
   const [exportOpen, setExportOpen] = useState(false);
   const [messageQuery, setMessageQuery] = useState("");
   const [searchIndex, setSearchIndex] = useState(0);
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(conversation?.metadata.title || "");
   const exportControl = useRef<HTMLDivElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
+  const messageSearchInput = useRef<HTMLInputElement>(null);
   const messageElements = useRef(new Map<string, HTMLElement>());
   const exportPreferencesRef = useRef<ExportPreferences | undefined>(exportPreferences);
-  useEffect(() => { setSelection({}); setExportStatus("idle"); setCopiedMessageId(undefined); setFailedMessageId(undefined); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); messageElements.current.clear(); }, [conversation?.id]);
+  useEffect(() => { setSelection({}); setExportStatus("idle"); setCopiedMessageId(undefined); setFailedMessageId(undefined); setExportOpen(false); setMessageQuery(""); setSearchIndex(0); setMessageSearchOpen(false); messageElements.current.clear(); }, [conversation?.id]);
   useEffect(() => {
     exportPreferencesRef.current = exportPreferences;
     setExportOptions(exportOptionsForLocale(storedConversationExportOptions(exportPreferences), locale));
@@ -243,6 +245,9 @@ export function ConversationReader({ conversation, allConversations = [], archiv
   useEffect(() => {
     if (editingTitle) titleInput.current?.focus();
   }, [editingTitle]);
+  useEffect(() => {
+    if (messageSearchOpen) messageSearchInput.current?.focus();
+  }, [messageSearchOpen]);
   if (!conversation) return <main className="reader empty-reader"><p>{t("noReadableMessages")}</p></main>;
   const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : conversation.messages;
   const normalisedQuery = messageQuery.trim().toLocaleLowerCase(locale);
@@ -322,11 +327,11 @@ export function ConversationReader({ conversation, allConversations = [], archiv
   };
   return <main className="reader">
     <div className="reader-actions">
-      <div className="conversation-search" role="search">
-        <input value={messageQuery} onChange={(event) => { setMessageQuery(event.target.value); setSearchIndex(0); }} onKeyDown={(event) => { if (event.key === "Enter") moveToHit(event.shiftKey ? -1 : 1); }} placeholder={locale === "zh-CN" ? "在当前对话中搜索" : "Search this conversation"} />
+      {messageSearchOpen ? <div className="conversation-search" role="search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget) && !messageQuery) setMessageSearchOpen(false); }}>
+        <input ref={messageSearchInput} value={messageQuery} onChange={(event) => { setMessageQuery(event.target.value); setSearchIndex(0); }} onKeyDown={(event) => { if (event.key === "Enter") moveToHit(event.shiftKey ? -1 : 1); }} placeholder={locale === "zh-CN" ? "在当前对话中搜索" : "Search this conversation"} />
         <span>{messageQuery ? `${searchHits.length ? Math.min(searchIndex + 1, searchHits.length) : 0}/${searchHits.length}` : ""}</span>
         <button type="button" disabled={!searchHits.length} onClick={() => moveToHit(-1)} aria-label="Previous match">↑</button><button type="button" disabled={!searchHits.length} onClick={() => moveToHit(1)} aria-label="Next match">↓</button>
-      </div>
+      </div> : <button className="quiet-button conversation-search-trigger" type="button" aria-label={locale === "zh-CN" ? "在当前对话中搜索" : "Search this conversation"} title={locale === "zh-CN" ? "在当前对话中搜索" : "Search this conversation"} onClick={() => setMessageSearchOpen(true)}><Icon name="search" /></button>}
       <div className="export-control" ref={exportControl}>
         <button className="quiet-button export-button" type="button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v3A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>{t("export")}</button>
       {exportOpen && <section className="export-panel" aria-label={t("export")}>

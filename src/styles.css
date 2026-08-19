@@ -117,6 +117,8 @@ a { color: inherit; }
 .conversation-search button { border: 0; border-radius: 5px; padding: 3px 5px; background: transparent; color: inherit; cursor: pointer; }
 .conversation-search button:hover:not(:disabled) { background: #eeeeef; }
 .conversation-search button:disabled { opacity: .35; cursor: default; }
+.conversation-search-trigger { display: grid; place-items: center; width: 34px; height: 34px; margin-right: 8px; padding: 0; }
+.conversation-search-trigger svg { width: 16px; height: 16px; }
 .export-button { display: inline-flex; align-items: center; gap: 5px; }
 .export-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .export-control { position: relative; flex: 0 0 auto; }
