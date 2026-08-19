@@ -1,6 +1,8 @@
 # archive-viewer
 
-A local-first reader for AI conversation exports. Files are processed in the browser and are never uploaded by the application.
+[English](README.md) | [中文](README.zh-CN.md)
+
+A reader for AI conversation exports. Files are processed in the browser and are never uploaded by the application.
 
 ## Features
 
