@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasReadableConversationContent, importFiles } from "./import-pipeline";
+import { consolidateImportWarnings, hasReadableConversationContent, importFiles } from "./import-pipeline";
 import type { MessageContentBlock, UniversalConversation } from "../../domain/conversation";
 
 function conversation(content: MessageContentBlock[]): UniversalConversation {
@@ -7,6 +7,21 @@ function conversation(content: MessageContentBlock[]): UniversalConversation {
 }
 
 describe("hasReadableConversationContent", () => {
+  it("consolidates preservation warnings from multiple import files", () => {
+    expect(consolidateImportWarnings([
+      { code: "EMPTY_MESSAGES_PRESERVED", message: "first", count: 2, conversationCount: 1 },
+      { code: "EMPTY_MESSAGES_PRESERVED", message: "second", count: 3, conversationCount: 2 },
+      { code: "EMPTY_CONVERSATIONS_PRESERVED", message: "3" },
+    ])).toEqual([expect.objectContaining({ count: 5, conversationCount: 3 })]);
+  });
+
+  it("keeps the empty-conversation notice when it describes additional conversations", () => {
+    expect(consolidateImportWarnings([
+      { code: "EMPTY_MESSAGES_PRESERVED", message: "first", count: 2, conversationCount: 1 },
+      { code: "EMPTY_CONVERSATIONS_PRESERVED", message: "2" },
+    ])).toHaveLength(2);
+  });
+
   it("rejects empty, whitespace-only, and unknown fallback messages", () => {
     expect(hasReadableConversationContent(conversation([]))).toBe(false);
     expect(hasReadableConversationContent(conversation([{ type: "text", text: "  " }]))).toBe(false);

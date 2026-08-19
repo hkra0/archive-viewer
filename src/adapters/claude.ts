@@ -160,6 +160,10 @@ export const claudeAdapter: FormatAdapter = {
   parse(input: ImportCandidate) {
     const data = JSON.parse(input.text) as ClaudeItem[];
     const warnings: ReturnType<FormatAdapter["parse"]>["warnings"] = [];
+    let emptyMessageCount = 0;
+    let emptyMessageConversationCount = 0;
+    let unknownBlockCount = 0;
+    let unknownBlockConversationCount = 0;
     const conversations = data.map((item) => {
       const sourceMessages = Array.isArray(item.chat_messages) ? item.chat_messages : Array.isArray(item.messages) ? item.messages : [];
       const parsed = sourceMessages.filter((message): message is ClaudeItem => Boolean(record(message))).map((message) => messageFromClaude(message, input));
@@ -167,13 +171,25 @@ export const claudeAdapter: FormatAdapter = {
       const attachments = [...new Map(parsed.flatMap((result) => result.attachments).map((attachment) => [attachment.id, attachment])).values()];
       const emptyCount = messages.filter((message) => message.content.every((block) => block.type === "empty")).length;
       const unknownCount = messages.flatMap((message) => message.content).filter((block) => block.type === "unknown").length;
-      if (emptyCount) warnings.push({ code: "EMPTY_MESSAGES_PRESERVED", message: `${emptyCount} empty messages were preserved.`, conversationId: string(item.uuid) });
-      if (unknownCount) warnings.push({ code: "UNKNOWN_BLOCKS_PRESERVED", message: `${unknownCount} unsupported content blocks were preserved for diagnostics.`, conversationId: string(item.uuid) });
+      if (emptyCount) { emptyMessageCount += emptyCount; emptyMessageConversationCount += 1; }
+      if (unknownCount) { unknownBlockCount += unknownCount; unknownBlockConversationCount += 1; }
       return {
         id: createId("conversation"), provider: { id: "claude", name: "Claude", sourceFormat: "JSON" },
         metadata: { title: string(item.name) || string(item.title) || "Untitled conversation", createdAt: toIsoDate(item.created_at ?? item.createdAt), updatedAt: toIsoDate(item.updated_at ?? item.updatedAt), sourceConversationId: string(item.uuid) || string(item.id) },
         messages, attachments,
       };
+    });
+    if (emptyMessageCount) warnings.push({
+      code: "EMPTY_MESSAGES_PRESERVED",
+      message: `${emptyMessageCount} empty messages were preserved across ${emptyMessageConversationCount} conversations.`,
+      count: emptyMessageCount,
+      conversationCount: emptyMessageConversationCount,
+    });
+    if (unknownBlockCount) warnings.push({
+      code: "UNKNOWN_BLOCKS_PRESERVED",
+      message: `${unknownBlockCount} unsupported content blocks were preserved across ${unknownBlockConversationCount} conversations for diagnostics.`,
+      count: unknownBlockCount,
+      conversationCount: unknownBlockConversationCount,
     });
     return { conversations, warnings };
   },

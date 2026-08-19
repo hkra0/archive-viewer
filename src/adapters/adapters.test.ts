@@ -87,6 +87,19 @@ describe("conversation adapters", () => {
     expect(conversation.attachments[0]).toMatchObject({ id: "file-1", name: "notes.md", textContent: "# Notes" });
   });
 
+  it("consolidates Claude empty-message warnings across conversations", () => {
+    const result = claudeAdapter.parse({
+      name: "conversations.json",
+      text: JSON.stringify([
+        { uuid: "one", chat_messages: [{ uuid: "one-empty", content: [] }, { uuid: "one-empty-too", content: [] }] },
+        { uuid: "two", chat_messages: [{ uuid: "two-empty", content: [] }] },
+      ]),
+    });
+    expect(result.warnings).toEqual([expect.objectContaining({
+      code: "EMPTY_MESSAGES_PRESERVED", count: 3, conversationCount: 2,
+    })]);
+  });
+
   it("reads DeepSeek fragment mappings without mixing reasoning into the answer", () => {
     const text = JSON.stringify([{ id: "deepseek-chat", title: "DeepSeek chat", mapping: {
       root: { id: "root", parent: null, message: null },

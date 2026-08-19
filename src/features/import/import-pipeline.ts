@@ -1,7 +1,8 @@
 import JSZip from "jszip";
 import { detectAdapter } from "../../adapters/registry";
 import type { ImportCandidate } from "../../adapters/adapter";
-import { ConversationArchiveSchema, type ArchiveSection, type ConversationArchive, type ImportWarning, type MessageContentBlock, type UniversalConversation } from "../../domain/conversation";
+import { ConversationArchiveSchema, type ArchiveSection, type ConversationArchive, type ImportWarning, type UniversalConversation } from "../../domain/conversation";
+import { hasReadableConversationContent } from "../../domain/conversation-content";
 import { IMPORT_LIMITS } from "./import-limits";
 import { annotateArchiveSectionSources, extractArchiveSections, mergeArchiveSections } from "./archive-sections";
 
@@ -24,6 +25,38 @@ export interface ImportReport {
   errors: string[];
   sourceType: ImportSourceType;
   account?: ImportedAccountProfile;
+}
+
+/** Consolidate preservation notices when an import contains multiple provider files. */
+export function consolidateImportWarnings(warnings: ImportWarning[]): ImportWarning[] {
+  const mergeableCodes = new Set(["EMPTY_MESSAGES_PRESERVED", "UNKNOWN_BLOCKS_PRESERVED"]);
+  const merged: ImportWarning[] = [];
+  const positions = new Map<string, number>();
+  for (const warning of warnings) {
+    if (!mergeableCodes.has(warning.code) || warning.count === undefined) { merged.push(warning); continue; }
+    const position = positions.get(warning.code);
+    if (position === undefined) {
+      positions.set(warning.code, merged.length);
+      merged.push({ ...warning });
+      continue;
+    }
+    const current = merged[position]!;
+    const count = (current.count || 0) + warning.count;
+    const conversationCount = (current.conversationCount || 0) + (warning.conversationCount || 0);
+    const description = warning.code === "EMPTY_MESSAGES_PRESERVED"
+      ? `${count} empty messages were preserved across ${conversationCount} conversations.`
+      : `${count} unsupported content blocks were preserved across ${conversationCount} conversations for diagnostics.`;
+    merged[position] = { ...current, count, conversationCount, message: description };
+  }
+  const emptyMessageConversationCount = merged
+    .filter((warning) => warning.code === "EMPTY_MESSAGES_PRESERVED")
+    .reduce((count, warning) => count + (warning.conversationCount || 0), 0);
+  return merged.filter((warning) => {
+    if (warning.code !== "EMPTY_CONVERSATIONS_PRESERVED") return true;
+    // The two notices describe the same set when their conversation counts match.
+    // Keep this notice for genuinely separate empty conversations.
+    return Number(warning.message) !== emptyMessageConversationCount;
+  });
 }
 
 function isSupportedTextFile(name: string): boolean {
@@ -56,19 +89,7 @@ function parseCandidate(candidate: ImportCandidate): { conversations: UniversalC
   }
 }
 
-function isReadableBlock(block: MessageContentBlock): boolean {
-  if (block.type === "text") return Boolean(block.text.trim());
-  if (block.type === "markdown") return Boolean(block.markdown.trim());
-  if (block.type === "code") return Boolean(block.code.trim());
-  if (block.type === "thinking") return Boolean(block.thinking.trim());
-  if (block.type === "tool-call" || block.type === "tool-result") return true;
-  return block.type === "image" || block.type === "file";
-}
-
-/** Empty containers and adapter fallbacks must not become conversations in the archive. */
-export function hasReadableConversationContent(conversation: UniversalConversation): boolean {
-  return conversation.messages.some((message) => message.content.some(isReadableBlock));
-}
+export { hasReadableConversationContent } from "../../domain/conversation-content";
 
 function firstString(value: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) if (typeof value[key] === "string" && value[key].trim()) return value[key].trim() as string;
@@ -220,7 +241,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
   const providerIds = [...new Set(conversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
   if (providerIds.length === 1) sections = annotateArchiveSectionSources(sections, providerIds[0]);
   const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations, sections });
-  return { archive, warnings, errors, sourceType, account };
+  return { archive, warnings: consolidateImportWarnings(warnings), errors, sourceType, account };
 }
 
 /** Backwards-compatible convenience entrypoint for regular file selection. */

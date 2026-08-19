@@ -119,6 +119,10 @@ export type ConversationArchive = z.infer<typeof ConversationArchiveSchema>;
 export interface ImportWarning {
   code: string;
   message: string;
+  /** Machine-readable total used to consolidate repeated import notices. */
+  count?: number;
+  /** Number of conversations contributing to a consolidated warning. */
+  conversationCount?: number;
   conversationId?: string;
   messageId?: string;
 }
