@@ -5,6 +5,7 @@ import { ConversationArchiveSchema, type ArchiveSection, type ConversationArchiv
 import { hasReadableConversationContent } from "../../domain/conversation-content";
 import { IMPORT_LIMITS } from "./import-limits";
 import { annotateArchiveSectionSources, extractArchiveSections, mergeArchiveSections } from "./archive-sections";
+import { chatGptArchiveSections, chatGptLibraryConversation } from "../../adapters/chatgpt-archive";
 
 export type ImportSourceType = "zip" | "folder" | "files";
 
@@ -67,6 +68,49 @@ function isAttachment(name: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg|pdf|txt|mp4|mov|webm)$/i.test(name)
     || /\/prod-mc-asset-server\/\/[^/]+\/content$/i.test(name)
     || !name.split("/").pop()?.includes(".");
+}
+
+function isChatGptShard(name: string): boolean {
+  return /(?:^|\/)conversations-\d+\.json$/i.test(name);
+}
+
+function isChatGptPackage(entries: Array<{ name: string }>): boolean {
+  return entries.some((entry) => isChatGptShard(entry.name));
+}
+
+function isChatGptCandidate(name: string): boolean {
+  return isChatGptShard(name) || /(?:^|\/)user\.json$/i.test(name)
+    || (/\.json$/i.test(name) && !/(?:^|\/)conversation_asset_file_names\.json$/i.test(name));
+}
+
+function isChatGptAttachment(name: string): boolean {
+  return /(?:^|\/)file[-_][^/]+\.dat$/i.test(name);
+}
+
+function sharedChatGptConversationIds(candidate: ImportCandidate): string[] {
+  if (!/(?:^|\/)shared_conversations\.json$/i.test(candidate.name)) return [];
+  try {
+    const parsed = JSON.parse(candidate.text);
+    return Array.isArray(parsed) ? parsed.flatMap((value) => value && typeof value === "object" && typeof (value as Record<string, unknown>).conversation_id === "string"
+      ? [(value as Record<string, unknown>).conversation_id as string] : []) : [];
+  } catch { return []; }
+}
+
+function markSharedChatGptConversations(conversations: UniversalConversation[], sharedIds: Set<string>): UniversalConversation[] {
+  if (!sharedIds.size) return conversations;
+  return conversations.map((conversation) => conversation.provider.id === "chatgpt" && conversation.metadata.sourceConversationId && sharedIds.has(conversation.metadata.sourceConversationId)
+    ? { ...conversation, metadata: { ...conversation.metadata, extra: { ...conversation.metadata.extra, chatgptShared: true } } }
+    : conversation);
+}
+
+function assetNamesFromJson(text: string): Map<string, string> {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    return new Map(Object.entries(parsed).flatMap(([path, name]) => typeof name === "string" ? [[path, name] as const] : []));
+  } catch {
+    return new Map();
+  }
 }
 
 function safePath(path: string): boolean {
@@ -147,10 +191,14 @@ async function candidatesFromZip(file: File): Promise<{ candidates: ImportCandid
   const entries = Object.values(zip.files).filter((entry) => !entry.dir);
   const errors: string[] = [];
   if (entries.length > IMPORT_LIMITS.maxZipEntries) return { candidates: [], errors: ["ZIP has too many entries."] };
+  const chatGptPackage = isChatGptPackage(entries);
+  const relevantEntries = chatGptPackage
+    ? entries.filter((entry) => isChatGptCandidate(entry.name) || isChatGptAttachment(entry.name) || /(?:^|\/)conversation_asset_file_names\.json$/i.test(entry.name))
+    : entries;
   const attachments = new Map<string, File>();
   let uncompressedBytes = 0;
 
-  for (const entry of entries) {
+  for (const entry of relevantEntries) {
     if (!safePath(entry.name)) {
       errors.push(`${entry.name}: unsafe archive path skipped.`);
       continue;
@@ -160,16 +208,25 @@ async function candidatesFromZip(file: File): Promise<{ candidates: ImportCandid
     const size = internalEntry._data?.uncompressedSize ?? 0;
     uncompressedBytes += size;
     if (uncompressedBytes > IMPORT_LIMITS.maxZipUncompressedBytes) return { candidates: [], errors: ["ZIP exceeds the uncompressed safety limit."] };
-    if (isAttachment(entry.name)) {
+    if (isAttachment(entry.name) || (chatGptPackage && isChatGptAttachment(entry.name))) {
       const blob = await entry.async("blob");
       attachments.set(entry.name, new File([blob], entry.name.split("/").pop() || entry.name, { type: blob.type }));
     }
   }
 
+  const assetNameEntry = chatGptPackage ? relevantEntries.find((entry) => /(?:^|\/)conversation_asset_file_names\.json$/i.test(entry.name)) : undefined;
+  const attachmentNames = assetNameEntry ? assetNamesFromJson(await assetNameEntry.async("text")) : undefined;
+
   const candidates: ImportCandidate[] = [];
-  for (const entry of entries.filter((item) => safePath(item.name) && isSupportedTextFile(item.name))) {
+  const candidateEntries = chatGptPackage
+    ? relevantEntries.filter((entry) => isChatGptCandidate(entry.name))
+    : entries.filter((entry) => isSupportedTextFile(entry.name));
+  for (const entry of candidateEntries.filter((item) => safePath(item.name))) {
     const text = await entry.async("text");
-    candidates.push({ name: entry.name, text, attachments });
+    candidates.push({
+      name: entry.name, text, attachments, attachmentNames,
+      providerHint: chatGptPackage && !isChatGptShard(entry.name) && !/(?:^|\/)user\.json$/i.test(entry.name) ? "chatgpt-archive" : undefined,
+    });
   }
   return { candidates, errors };
 }
@@ -193,6 +250,7 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
   const scopedEntries = entries.slice(0, IMPORT_LIMITS.maxFiles);
   const directAttachments = folderAttachments(scopedEntries);
   let account: ImportedAccountProfile | undefined;
+  const sharedChatGptIds = new Set<string>();
   let preservedEmptyConversations = 0;
   const sourceType: ImportSourceType = entries.some(({ file }) => /\.zip$/i.test(file.name)) ? "zip" : selectionType;
 
@@ -222,6 +280,14 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
           : { candidates: [], errors: [] };
       errors.push(...candidates.errors);
       for (const candidate of candidates.candidates) {
+        if (candidate.providerHint === "chatgpt-archive") {
+          sharedChatGptConversationIds(candidate).forEach((id) => sharedChatGptIds.add(id));
+          const extractedSections = chatGptArchiveSections(candidate);
+          sections = mergeArchiveSections(sections, extractedSections);
+          const library = chatGptLibraryConversation(candidate, new Set(conversations.flatMap((conversation) => conversation.attachments.map((attachment) => attachment.id))));
+          if (library) conversations.push(library);
+          continue;
+        }
         const extractedSections = extractArchiveSections(candidate);
         sections = mergeArchiveSections(sections, extractedSections);
         const profile = accountProfileFromCandidate(candidate);
@@ -238,9 +304,10 @@ export async function importEntries(entries: ImportEntry[], selectionType: Exclu
     }
   }
   if (preservedEmptyConversations) warnings.push({ code: "EMPTY_CONVERSATIONS_PRESERVED", message: String(preservedEmptyConversations) });
-  const providerIds = [...new Set(conversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
+  const markedConversations = markSharedChatGptConversations(conversations, sharedChatGptIds);
+  const providerIds = [...new Set(markedConversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
   if (providerIds.length === 1) sections = annotateArchiveSectionSources(sections, providerIds[0]);
-  const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations, sections });
+  const archive = ConversationArchiveSchema.parse({ schemaVersion: "1.0", sourceFiles, conversations: markedConversations, sections });
   return { archive, warnings: consolidateImportWarnings(warnings), errors, sourceType, account };
 }
 

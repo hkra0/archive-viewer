@@ -1,5 +1,6 @@
 import type { UniversalAttachment, UniversalConversation } from "../../domain/conversation";
 import { annotateArchiveSectionSources, mergeArchiveSections } from "../import/archive-sections";
+import { normaliseChatGptArchiveSections } from "../../adapters/chatgpt-archive";
 import type { ConversationGroup, GroupData, ImportBatch } from "./group-types";
 import { THEME_STORAGE_KEY } from "../../lib/theme";
 
@@ -76,6 +77,17 @@ function groupConversationKey(groupId: string, conversationId: string): string {
   return `${groupId}:${conversationId}`;
 }
 
+function legacySharedChatGptIds(sections: GroupData["sections"]): Set<string> {
+  return new Set(sections.filter((section) => section.id === "chatgpt-shared-conversations")
+    .flatMap((section) => section.items.map((item) => item.fields?.["Conversation ID"]).filter((id): id is string => Boolean(id))));
+}
+
+function markLegacySharedChatGptConversations(conversations: UniversalConversation[], sharedIds: Set<string>): UniversalConversation[] {
+  return conversations.map((conversation) => conversation.provider.id === "chatgpt" && conversation.metadata.sourceConversationId && sharedIds.has(conversation.metadata.sourceConversationId)
+    ? { ...conversation, metadata: { ...conversation.metadata, extra: { ...conversation.metadata.extra, chatgptShared: true } } }
+    : conversation);
+}
+
 export async function listGroups(): Promise<ConversationGroup[]> {
   const database = await openDatabase();
   try {
@@ -101,10 +113,11 @@ export async function loadGroup(groupId: string): Promise<GroupData | undefined>
     const sectionRecord = await requestValue(transaction.objectStore(ARCHIVE_SECTIONS).get(groupId)) as { groupId: string; sections: GroupData["sections"] } | undefined;
     const batches = await requestValue(transaction.objectStore(BATCHES).index("groupId").getAll(IDBKeyRange.only(groupId))) as ImportBatch[];
     await transactionDone(transaction);
-    const conversations = records.map((record) => hydrateConversation(record.conversation));
+    const storedSections = sectionRecord?.sections || [];
+    const conversations = markLegacySharedChatGptConversations(records.map((record) => hydrateConversation(record.conversation)), legacySharedChatGptIds(storedSections));
     // Normalise older groups in memory too, so profile navigation is repaired
     // immediately instead of requiring another import to trigger a merge.
-    const normalisedSections = mergeArchiveSections([], sectionRecord?.sections || []);
+    const normalisedSections = normaliseChatGptArchiveSections(mergeArchiveSections([], storedSections));
     const providerIds = [...new Set(conversations.map((conversation) => conversation.provider.id).filter((id) => id !== "generic"))];
     const sections = providerIds.length === 1 ? annotateArchiveSectionSources(normalisedSections, providerIds[0]) : normalisedSections;
     return { group, conversations, sections, batches: batches.sort((a, b) => b.importedAt.localeCompare(a.importedAt)) };

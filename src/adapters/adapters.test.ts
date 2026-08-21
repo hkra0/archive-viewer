@@ -32,6 +32,82 @@ describe("conversation adapters", () => {
     expect(result.conversations[0]?.messages[0]?.parentMessageId).toBeUndefined();
   });
 
+  it("reads multimodal messages from current ChatGPT conversation shards", () => {
+    const text = JSON.stringify([{
+      id: "chat-1", title: "Image chat", create_time: 1_700_000_000,
+      mapping: {
+        root: { message: null },
+        message: {
+          parent: "root",
+          message: {
+            author: { role: "user" }, create_time: 1_700_000_001,
+            content: { content_type: "multimodal_text", parts: [{ id: "file-image", content_type: "image_asset_pointer" }, "What is this?"] },
+            metadata: { attachments: [{ id: "file-image", name: "photo.png", mime_type: "image/png", size: 4 }] },
+          },
+        },
+      },
+    }]);
+    const asset = new File([new Uint8Array([137, 80, 78, 71])], "file-image.dat", { type: "application/octet-stream" });
+    const result = chatGptAdapter.parse({
+      name: "conversations-000.json", text,
+      attachments: new Map([["file-image.dat", asset]]),
+      attachmentNames: new Map([["file-image.dat", "photo.png"]]),
+    });
+    const conversation = result.conversations[0]!;
+
+    expect(conversation.messages[0]?.content).toEqual([
+      { type: "markdown", markdown: "What is this?" },
+      { type: "image", attachmentId: "file-image", alt: "photo.png" },
+    ]);
+    expect(conversation.attachments).toMatchObject([{ id: "file-image", name: "photo.png", mimeType: "image/png", size: 4, sourcePath: "file-image.dat" }]);
+  });
+
+  it("preserves ChatGPT recaps, unknown blocks, and non-sensitive export metadata", () => {
+    const text = JSON.stringify([{
+      id: "chat-1", title: "Rich chat", conversation_template_id: "g-template", access_token: "discard-me",
+      mapping: {
+        root: { message: null },
+        recap: { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "Compared two approaches." } } },
+        future: { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "future_payload", data: { value: 1 } }, metadata: { api_key: "discard-me", safe: "keep-me" } } },
+      },
+    }]);
+    const conversation = chatGptAdapter.parse({ name: "conversations-000.json", text }).conversations[0]!;
+
+    expect(conversation.messages[0]?.content).toEqual([{ type: "thinking", thinking: "Compared two approaches.", summaries: ["ChatGPT reasoning recap"] }]);
+    expect(conversation.messages[1]?.content).toEqual([{ type: "unknown", raw: { content_type: "future_payload", data: { value: 1 } } }]);
+    expect(conversation.messages[1]?.metadata).toMatchObject({ chatgpt: { metadata: { safe: "keep-me" } } });
+    expect(JSON.stringify(conversation.metadata.extra)).toContain("g-template");
+    expect(JSON.stringify(conversation.metadata.extra)).not.toContain("discard-me");
+  });
+
+  it("keeps useful ChatGPT thought summaries but removes generic duration recaps", () => {
+    const text = JSON.stringify([{
+      id: "chat-1", title: "Thoughts", mapping: {
+        root: { message: null },
+        prompt: { parent: "root", message: { author: { role: "user" }, content: { parts: ["Hello"] } } },
+        recap: { parent: "prompt", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "Worked for a couple of seconds" } } },
+        thought: { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ chunks: [], content: "", finished: true, summary: "Checked the source data." }] } } },
+      },
+    }]);
+    const messages = chatGptAdapter.parse({ name: "conversations-000.json", text }).conversations[0]!.messages;
+
+    expect(messages.map((message) => message.id)).toEqual(["prompt", "thought"]);
+    expect(messages[1]).toMatchObject({ parentMessageId: "prompt", content: [{ type: "thinking", thinking: "Checked the source data.", summaries: ["ChatGPT reasoning"] }] });
+  });
+
+  it("prefers extracted ChatGPT thought content and falls back to its summary", () => {
+    const text = JSON.stringify([{
+      id: "chat-1", title: "Thoughts", mapping: {
+        root: { message: null },
+        content: { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "Read the attachment first.", summary: "Read attachment" }] } } },
+        summary: { parent: "content", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "", summary: "Checked the source data." }] } } },
+      },
+    }]);
+    const messages = chatGptAdapter.parse({ name: "conversations-000.json", text }).conversations[0]!.messages;
+    expect(messages[0]?.content).toMatchObject([{ type: "thinking", thinking: "Read the attachment first." }]);
+    expect(messages[1]?.content).toMatchObject([{ type: "thinking", thinking: "Checked the source data." }]);
+  });
+
   it("preserves Claude message parents so edited prompts remain branches", () => {
     const result = claudeAdapter.parse({
       name: "conversations.json",

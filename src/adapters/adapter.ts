@@ -5,6 +5,10 @@ export interface ImportCandidate {
   text: string;
   mimeType?: string;
   attachments?: Map<string, File>;
+  /** Original names supplied by archive manifests for otherwise opaque attachment paths. */
+  attachmentNames?: Map<string, string>;
+  /** Routes package-specific supplementary records without treating them as generic conversations. */
+  providerHint?: "chatgpt-archive";
 }
 
 export interface DetectionResult {

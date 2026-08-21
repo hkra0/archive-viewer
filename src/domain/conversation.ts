@@ -87,6 +87,8 @@ export const ArchiveRecordSchema = z.object({
   id: z.string(),
   title: z.string().optional(),
   body: z.string().optional(),
+  /** Preserved source data, intentionally hidden behind an explicit disclosure in the UI. */
+  raw: z.unknown().optional(),
   fields: z.record(z.string(), z.string()).optional(),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
@@ -95,7 +97,7 @@ export type ArchiveRecord = z.infer<typeof ArchiveRecordSchema>;
 
 export const ArchiveSectionSchema = z.object({
   id: z.string(),
-  kind: z.enum(["profile", "projects", "memories", "tasks", "assistants", "instructions", "other"]),
+  kind: z.enum(["profile", "projects", "memories", "tasks", "assistants", "instructions", "library", "other"]),
   title: z.string().optional(),
   providerId: z.string().optional(),
   items: z.array(ArchiveRecordSchema),

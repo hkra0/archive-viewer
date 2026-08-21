@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-export type IconName = "menu" | "chevron" | "search" | "import" | "download" | "sun" | "moon" | "system" | "trash" | "warning" | "panel" | "edit" | "plus" | "settings" | "user" | "folder" | "memory" | "tasks" | "spark" | "copy" | "chart" | "square" | "check-square" | "select-all" | "deselect-all" | "invert" | "undo";
+export type IconName = "menu" | "chevron" | "search" | "import" | "download" | "sun" | "moon" | "system" | "trash" | "warning" | "panel" | "edit" | "plus" | "settings" | "user" | "folder" | "memory" | "tasks" | "spark" | "copy" | "chart" | "image" | "grid" | "list" | "share" | "square" | "check-square" | "select-all" | "deselect-all" | "invert" | "undo";
 
 export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
@@ -26,6 +26,10 @@ export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGEle
     {name === "spark" && <><path d="m12 3 1.2 4.8L18 9l-4.8 1.2L12 15l-1.2-4.8L6 9l4.8-1.2Z" /><path d="m18.5 14 .6 2.4 2.4.6-2.4.6-.6 2.4-.6-2.4-2.4-.6 2.4-.6Z" /></>}
     {name === "copy" && <><rect x="8.5" y="8.5" width="11" height="11" rx="1.5" /><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" /></>}
     {name === "chart" && <><path d="M4 19.5h16M6.5 17V11m5.5 6V5m5.5 12V8" /><path d="M5 8.5 10 4l4 3 5-3.5" /></>}
+    {name === "image" && <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4.5 17 4.7-4.7 3.1 3.1 2.4-2.4 4.3 4.3" /></>}
+    {name === "grid" && <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>}
+    {name === "list" && <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></>}
+    {name === "share" && <><circle cx="18" cy="5.5" r="2" /><circle cx="6" cy="12" r="2" /><circle cx="18" cy="18.5" r="2" /><path d="m7.8 11 8.4-4.5M7.8 13l8.4 4.5" /></>}
     {name === "square" && <rect x="4.5" y="4.5" width="15" height="15" rx="2" />}
     {name === "check-square" && <><rect x="4.5" y="4.5" width="15" height="15" rx="2" /><path d="m8 12 2.5 2.5 5.5-5.5" /></>}
     {name === "select-all" && <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m7.5 12 2.2 2.2 4.8-4.8M16.5 5.5v-2m0 17v-2M5.5 5.5h-2m17 0h-2" /></>}

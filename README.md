@@ -34,4 +34,4 @@ Deploy the generated `dist` directory to Cloudflare Pages. No server-side databa
 
 ## Supported inputs
 
-The importer detects ChatGPT `conversations.json`, common Claude JSON exports, Grok backend exports, DeepSeek fragment mappings, Google Takeout Gemini activity HTML, generic JSON collections, Markdown files, folders containing those files, and ZIP archives containing those formats. Other exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.
+The importer detects ChatGPT `conversations.json` and current sharded exports such as `conversations-000.json` with their packaged attachments, common Claude JSON exports, Grok backend exports, DeepSeek fragment mappings, Google Takeout Gemini activity HTML, generic JSON collections, Markdown files, folders containing those files, and ZIP archives containing those formats. Other exports with conventional `title`/`messages`/`role`/`content` fields use the generic JSON adapter; provider-specific adapters can be added independently.

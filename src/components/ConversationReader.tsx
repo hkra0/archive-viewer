@@ -114,6 +114,31 @@ function searchableMessageText(message: UniversalMessage): string {
   }).join(" ");
 }
 
+function chatGptConversationMetadata(conversation: UniversalConversation): Record<string, unknown> | undefined {
+  const extra = conversation.metadata.extra?.chatgpt;
+  return extra && typeof extra === "object" && !Array.isArray(extra) ? extra as Record<string, unknown> : undefined;
+}
+
+function chatGptConversationInfo(conversation: UniversalConversation, locale: "zh-CN" | "en"): Array<[string, string]> {
+  const data = chatGptConversationMetadata(conversation);
+  if (!data) return [];
+  const items: Array<[string, string]> = [];
+  const label = (zh: string, en: string) => locale === "zh-CN" ? zh : en;
+  const add = (zh: string, en: string, value: unknown) => { if (typeof value === "string" && value.trim()) items.push([label(zh, en), value]); };
+  add("模型", "Model", data.default_model_slug);
+  if (data.is_archived === true) items.push([label("已归档", "Archived"), label("是", "Yes")]);
+  if (data.is_starred === true) items.push([label("已收藏", "Starred"), label("是", "Yes")]);
+  if (data.is_study_mode === true) items.push([label("学习模式", "Study mode"), label("是", "Yes")]);
+  if (data.is_read_only === true) items.push([label("只读", "Read-only"), label("是", "Yes")]);
+  if (data.is_do_not_remember === true) items.push([label("使用记忆", "Use memory"), label("否", "No")]);
+  if (data.memory_scope === "global_enabled") items.push([label("全局记忆", "Global memory"), label("已启用", "Enabled")]);
+  if (data.memory_scope === "global_disabled") items.push([label("全局记忆", "Global memory"), label("未启用", "Disabled")]);
+  if (data.voice && data.voice !== false) items.push([label("语音", "Voice"), label("已使用", "Used")]);
+  add("关联 GPT", "Linked GPT", data.conversation_template_id);
+  if (conversation.metadata.extra?.chatgptShared === true) items.push([label("共享对话", "Shared conversation"), label("是", "Yes")]);
+  return items;
+}
+
 export function messageClipboardText(message: UniversalMessage, conversation: UniversalConversation): string {
   const attachmentName = (attachmentId: string) => conversation.attachments.find((attachment) => attachment.id === attachmentId)?.name || attachmentId;
   const serialise = (value: unknown) => JSON.stringify(value, null, 2) || "";
@@ -138,6 +163,47 @@ function byDateThenInput(a: UniversalMessage, b: UniversalMessage): number {
   if (!Number.isNaN(aTime) && Number.isNaN(bTime)) return -1;
   if (Number.isNaN(aTime) && !Number.isNaN(bTime)) return 1;
   return 0;
+}
+
+function isGenericChatGptRecap(message: UniversalMessage): boolean {
+  if (!message.content.some((block) => block.type === "thinking" && block.summaries?.includes("ChatGPT reasoning recap"))) return false;
+  const text = message.content.flatMap((block) => block.type === "thinking" ? [block.thinking.trim()] : []).join(" ");
+  return /^(?:worked|thought|thinking)(?:\s+for)?\s+(?:a\s+)?(?:couple of |few )?(?:seconds?|minutes?)$/i.test(text)
+    || /^(?:worked|thought|thinking)\s+for\s+\d+(?:\.\d+)?\s+(?:seconds?|minutes?)$/i.test(text);
+}
+
+function storedThoughtText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (Array.isArray(value)) return value.map(storedThoughtText).filter((item): item is string => Boolean(item)).join("\n\n") || undefined;
+  if (!value || typeof value !== "object") return undefined;
+  const thought = value as Record<string, unknown>;
+  return typeof thought.content === "string" && thought.content.trim() ? thought.content.trim()
+    : typeof thought.summary === "string" && thought.summary.trim() ? thought.summary.trim()
+      : undefined;
+}
+
+function readerMessages(messages: UniversalMessage[]): UniversalMessage[] {
+  // Compatibility for conversations imported before thoughts were normalised.
+  const normalised = messages.map((message) => ({ ...message, content: message.content.flatMap((block) => {
+    if (block.type !== "thinking" || !block.summaries?.includes("ChatGPT thoughts")) return [block];
+    try {
+      const text = storedThoughtText(JSON.parse(block.thinking));
+      return text ? [{ ...block, thinking: text, summaries: ["ChatGPT reasoning"] }] : [];
+    } catch { return []; }
+  }) }));
+  const omitted = new Set(normalised.filter((message) => isGenericChatGptRecap(message) || !message.content.length).map((message) => message.id));
+  if (!omitted.size) return normalised;
+  const byId = new Map(normalised.map((message) => [message.id, message]));
+  const visibleParent = (parent: string | undefined) => {
+    let current = parent;
+    const seen = new Set<string>();
+    while (current && omitted.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = byId.get(current)?.parentMessageId;
+    }
+    return current;
+  };
+  return normalised.filter((message) => !omitted.has(message.id)).map((message) => ({ ...message, parentMessageId: visibleParent(message.parentMessageId) }));
 }
 
 export function buildConversationTree(messages: UniversalMessage[]): ConversationTree {
@@ -196,7 +262,8 @@ function BranchNavigator({ siblings, selectedId, onSelect }: { siblings: Univers
 
 export function ConversationReader({ conversation, allConversations = [], archiveSections = [], selectedConversationIds = [], exportPreferences, onExportPreferencesChange, onTitleChange }: { conversation?: UniversalConversation; allConversations?: UniversalConversation[]; archiveSections?: ArchiveSection[]; selectedConversationIds?: string[]; exportPreferences?: ExportPreferences; onExportPreferencesChange?(preferences: ExportPreferences): void; onTitleChange?(title: string): void }) {
   const { locale, t } = useI18n();
-  const tree = useMemo(() => buildConversationTree(conversation?.messages || []), [conversation]);
+  const displayMessages = useMemo(() => readerMessages(conversation?.messages || []), [conversation]);
+  const tree = useMemo(() => buildConversationTree(displayMessages), [displayMessages]);
   const [selection, setSelection] = useState<Record<string, string>>({});
   const [exportOptions, setExportOptions] = useState<ConversationExportOptions>(() => exportOptionsForLocale(storedConversationExportOptions(exportPreferences), locale));
   const [continuationPromptEdited, setContinuationPromptEdited] = useState(() => hasEditedContinuationPrompt(storedConversationExportOptions(exportPreferences), locale));
@@ -249,7 +316,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
     if (messageSearchOpen) messageSearchInput.current?.focus();
   }, [messageSearchOpen]);
   if (!conversation) return <main className="reader empty-reader"><p>{t("noReadableMessages")}</p></main>;
-  const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : conversation.messages;
+  const messages = tree.hasRelationships ? visiblePath(tree, tree.roots, ROOT_SELECTION_KEY, selection) : displayMessages;
   const normalisedQuery = messageQuery.trim().toLocaleLowerCase(locale);
   const searchHits = normalisedQuery ? messages.filter((message) => searchableMessageText(message).toLocaleLowerCase(locale).includes(normalisedQuery)) : [];
   const currentHit = searchHits[Math.min(searchIndex, Math.max(0, searchHits.length - 1))];
@@ -325,6 +392,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
     setTitleDraft(conversation.metadata.title);
     setEditingTitle(false);
   };
+  const chatGptInfo = conversation.provider.id === "chatgpt" ? chatGptConversationInfo(conversation, locale) : [];
   return <main className="reader">
     <div className="reader-actions">
       {messageSearchOpen ? <div className="conversation-search" role="search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget) && !messageQuery) setMessageSearchOpen(false); }}>
@@ -356,7 +424,7 @@ export function ConversationReader({ conversation, allConversations = [], archiv
       </div>
     </div>
     <header className="reader-header">
-      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{editingTitle ? <input ref={titleInput} className="reader-title-input" value={titleDraft} maxLength={240} aria-label={t("editTitle")} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } if (event.key === "Escape") { event.preventDefault(); cancelTitleEdit(); } }} /> : onTitleChange ? <button type="button" className="reader-title-edit-button" onClick={() => { setTitleDraft(conversation.metadata.title); setEditingTitle(true); }} aria-label={`${t("editTitle")}: ${conversation.metadata.title}`} title={t("editTitle")}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p></div>
+      <div className="reader-title"><p className="eyebrow">{conversation.provider.name}</p><h1>{editingTitle ? <input ref={titleInput} className="reader-title-input" value={titleDraft} maxLength={240} aria-label={t("editTitle")} onChange={(event) => setTitleDraft(event.target.value)} onBlur={commitTitle} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } if (event.key === "Escape") { event.preventDefault(); cancelTitleEdit(); } }} /> : onTitleChange ? <button type="button" className="reader-title-edit-button" onClick={() => { setTitleDraft(conversation.metadata.title); setEditingTitle(true); }} aria-label={`${t("editTitle")}: ${conversation.metadata.title}`} title={t("editTitle")}>{conversation.metadata.title}</button> : <span className="reader-conversation-title" title={conversation.metadata.title}>{conversation.metadata.title}</span>}</h1><p>{messages.length} {t("messages")} · {formatDate(conversation.metadata.updatedAt ?? conversation.metadata.createdAt, locale, t("unknownDate"))}{detachedCount ? ` · ${detachedCount}` : ""}{placeholderCount ? ` · ${placeholderCount}` : ""}</p>{chatGptInfo.length > 0 && <details className="structured-block chatgpt-metadata"><summary>{t("chatGptMetadata")}</summary><dl>{chatGptInfo.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></details>}</div>
     </header>
     <section className="messages" aria-label={t("messages")}>
       {messages.filter((message) => message.role === "user").length > 1 && <nav className="message-jump-nav" aria-label={locale === "zh-CN" ? "提问导航" : "Prompt navigation"}>{messages.filter((message) => message.role === "user").map((message, index) => <button key={message.id} type="button" title={searchableMessageText(message).slice(0, 160)} onClick={() => messageElements.current.get(message.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}>{index + 1}</button>)}</nav>}

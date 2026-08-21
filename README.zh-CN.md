@@ -34,4 +34,4 @@ npm run build
 
 ## 支持的输入格式
 
-导入器可识别 ChatGPT 的 `conversations.json`、常见 Claude JSON 导出、Grok 后端导出、DeepSeek 片段映射、Google Takeout Gemini 活动 HTML、通用 JSON 集合、Markdown 文件、包含上述格式的文件夹，以及 ZIP 压缩包。对于具有常规 `title`、`messages`、`role`、`content` 字段的其他导出文件，将使用通用 JSON 适配器；也可按需独立添加特定平台的适配器。
+导入器可识别 ChatGPT 的 `conversations.json`，以及新版导出包中的 `conversations-000.json` 等分片和关联附件；也支持常见 Claude JSON 导出、Grok 后端导出、DeepSeek 片段映射、Google Takeout Gemini 活动 HTML、通用 JSON 集合、Markdown 文件、包含上述格式的文件夹，以及 ZIP 压缩包。对于具有常规 `title`、`messages`、`role`、`content` 字段的其他导出文件，将使用通用 JSON 适配器；也可按需独立添加特定平台的适配器。
